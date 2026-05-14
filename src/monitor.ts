@@ -68,6 +68,7 @@ export async function checkUrl(url: MonitoredUrl, isBaseline = false): Promise<v
   let textDiffSummary = "";
   let selectorWarnings: string[] = [];
   let selectorDiff: ReturnType<typeof compareSelectorCaptures> | null = null;
+  let diffBbox: ReturnType<typeof compareScreenshots>["diff_bbox"] = null;
 
   if (useSelectors) {
     const refDir = path.dirname(reference!.screenshot_path);
@@ -87,6 +88,7 @@ export async function checkUrl(url: MonitoredUrl, isBaseline = false): Promise<v
       path.join(path.dirname(capture.screenshotPath), "diff.png"),
     );
     pixelDiffPercent = pixelResult.diffPercent;
+    diffBbox = pixelResult.diff_bbox ?? null;
 
     const refText = readTextContent(reference!.text_path);
     const textResult = compareText(refText, capture.textContent);
@@ -137,6 +139,7 @@ export async function checkUrl(url: MonitoredUrl, isBaseline = false): Promise<v
         capture.screenshotPath,
         textDiffSummary,
         url.url,
+        diffBbox ?? undefined,
       );
     }
   } catch (err: any) {

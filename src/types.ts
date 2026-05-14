@@ -1,3 +1,14 @@
+export interface FormAuthConfig {
+  type: "form";
+  login_url: string;
+  username_env: string;
+  password_env: string;
+  username_selector: string;
+  password_selector: string;
+  submit_selector: string;
+  success_check: string;
+}
+
 export interface UrlConfig {
   url: string;
   label: string;
@@ -5,6 +16,7 @@ export interface UrlConfig {
     slack?: boolean;
     email?: boolean;
   };
+  auth?: FormAuthConfig;
 }
 
 export interface AppConfig {
@@ -90,6 +102,7 @@ export interface MonitoredUrl {
   consecutive_failures?: number;
   selectors_json?: string | null;
   selectors?: string[];
+  auth?: FormAuthConfig;
 }
 
 export interface SelectorCapture {

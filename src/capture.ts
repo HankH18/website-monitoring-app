@@ -2,7 +2,7 @@ import { chromium, Browser, Page } from "playwright";
 import fs from "fs";
 import path from "path";
 import { loadConfig } from "./config";
-import { CaptureResult, SelectorCapture } from "./types";
+import { CaptureResult, FormAuthConfig, SelectorCapture } from "./types";
 import { ensureCaptureDir, getScreenshotPath, getTextPath } from "./storage/files";
 import { logger } from "./logger";
 import { withRetry } from "./util/retry";
@@ -21,6 +21,11 @@ export async function getBrowser(): Promise<Browser> {
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   return _browser;
+}
+
+export function getBrowserStatus(): "ok" | "not_started" | "disconnected" {
+  if (!_browser) return "not_started";
+  return _browser.isConnected() ? "ok" : "disconnected";
 }
 
 function isTransientGotoError(err: unknown): boolean {
@@ -69,12 +74,19 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-export async function capturePage(url: string, selectors: string[] = []): Promise<CaptureResult> {
+export async function capturePage(
+  url: string,
+  selectors: string[] = [],
+  auth?: FormAuthConfig,
+): Promise<CaptureResult> {
   const config = loadConfig();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const captureDir = ensureCaptureDir(url, timestamp);
   const screenshotPath = getScreenshotPath(captureDir);
   const textPath = getTextPath(captureDir);
+
+  // Fall back to looking up auth from config.yaml (auth lives in config, not DB).
+  const effectiveAuth = auth ?? config.urls.find((u) => u.url === url)?.auth ?? undefined;
 
   const browser = await getBrowser();
   const context = await browser.newContext({
@@ -89,6 +101,26 @@ export async function capturePage(url: string, selectors: string[] = []): Promis
   const page = await context.newPage();
 
   try {
+    if (effectiveAuth && effectiveAuth.type === "form") {
+      const authErr = await performFormLogin(page, effectiveAuth);
+      if (authErr) {
+        const errorText = `ERROR: auth failed: ${authErr}`;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false });
+        } catch {}
+        fs.writeFileSync(textPath, errorText, "utf-8");
+        logger.error(`Capture auth failed for ${url}: ${authErr}`);
+        return {
+          screenshotPath,
+          textContent: errorText,
+          textPath,
+          timestamp,
+          url,
+          error: `auth failed: ${authErr}`,
+        };
+      }
+    }
+
     await withRetry(
       async () => {
         const response = await page.goto(url, {
@@ -241,6 +273,24 @@ export async function capturePage(url: string, selectors: string[] = []): Promis
     };
   } finally {
     await context.close();
+  }
+}
+
+async function performFormLogin(page: Page, auth: FormAuthConfig): Promise<string | null> {
+  const username = process.env[auth.username_env];
+  const password = process.env[auth.password_env];
+  if (!username || !password) {
+    return `missing env vars ${auth.username_env}/${auth.password_env}`;
+  }
+  try {
+    await page.goto(auth.login_url, { waitUntil: "networkidle", timeout: 30000 });
+    await page.locator(auth.username_selector).fill(username, { timeout: 10000 });
+    await page.locator(auth.password_selector).fill(password, { timeout: 10000 });
+    await page.locator(auth.submit_selector).click({ timeout: 10000 });
+    await page.locator(auth.success_check).waitFor({ state: "visible", timeout: 15000 });
+    return null;
+  } catch (err: any) {
+    return err?.message ?? String(err);
   }
 }
 
