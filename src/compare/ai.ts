@@ -1,10 +1,67 @@
 import Anthropic from "@anthropic-ai/sdk";
 import fs from "fs";
+import sharp from "sharp";
 import { AiAssessment } from "../types";
 import { logger } from "../logger";
 import { withRetry } from "../util/retry";
 
 const AI_REQUEST_TIMEOUT_MS = 60_000;
+
+const AI_MODEL = "claude-sonnet-4-20250514";
+
+// Anthropic recommends ≤1568px on the long axis for image inputs.
+const MAX_IMAGE_LONG_AXIS_PX = 1568;
+
+// Per-million-token USD pricing for Anthropic models.
+const PRICING_PER_MTOK = {
+  sonnet: { input: 3, output: 15 },
+  haiku: { input: 1, output: 5 },
+  opus: { input: 15, output: 75 },
+} as const;
+
+function pricingForModel(model: string): { input: number; output: number } {
+  const m = model.toLowerCase();
+  if (m.includes("haiku")) return PRICING_PER_MTOK.haiku;
+  if (m.includes("opus")) return PRICING_PER_MTOK.opus;
+  return PRICING_PER_MTOK.sonnet;
+}
+
+function computeCostUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  const p = pricingForModel(model);
+  return (inputTokens * p.input + outputTokens * p.output) / 1_000_000;
+}
+
+async function loadAndResizeForAi(imagePath: string): Promise<string> {
+  const buf = fs.readFileSync(imagePath);
+  const meta = await sharp(buf).metadata();
+  const longAxis = Math.max(meta.width ?? 0, meta.height ?? 0);
+  if (longAxis > 0 && longAxis <= MAX_IMAGE_LONG_AXIS_PX) {
+    // Already within limit — skip the re-encode round-trip.
+    return buf.toString("base64");
+  }
+  const resized = await sharp(buf)
+    .resize({
+      width: MAX_IMAGE_LONG_AXIS_PX,
+      height: MAX_IMAGE_LONG_AXIS_PX,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png()
+    .toBuffer();
+  return resized.toString("base64");
+}
+
+export interface AssessChangeResult extends AiAssessment {
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+  };
+}
 
 function isTransientAiError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -116,14 +173,13 @@ export async function assessChange(
   currentScreenshotPath: string,
   textDiff: string,
   url: string,
-): Promise<AiAssessment> {
+): Promise<AssessChangeResult> {
   const client = getClient();
 
-  const refImage = fs.readFileSync(referenceScreenshotPath);
-  const curImage = fs.readFileSync(currentScreenshotPath);
-
-  const refBase64 = refImage.toString("base64");
-  const curBase64 = curImage.toString("base64");
+  const [refBase64, curBase64] = await Promise.all([
+    loadAndResizeForAi(referenceScreenshotPath),
+    loadAndResizeForAi(currentScreenshotPath),
+  ]);
 
   logger.info(`Sending AI assessment request for ${url}`);
 
@@ -134,7 +190,7 @@ export async function assessChange(
       try {
         return await client.messages.create(
           {
-            model: "claude-sonnet-4-20250514",
+            model: AI_MODEL,
             max_tokens: 1024,
             system: SYSTEM_PROMPT,
             messages: [
@@ -188,6 +244,14 @@ export async function assessChange(
   const text =
     response.content[0].type === "text" ? response.content[0].text : "";
 
+  const inputTokens = response.usage?.input_tokens ?? 0;
+  const outputTokens = response.usage?.output_tokens ?? 0;
+  const usage = {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cost_usd: computeCostUsd(AI_MODEL, inputTokens, outputTokens),
+  };
+
   try {
     // Strip any markdown wrapping if present
     const jsonStr = text
@@ -197,10 +261,10 @@ export async function assessChange(
     const assessment = JSON.parse(jsonStr) as AiAssessment;
 
     logger.info(
-      `AI assessment for ${url}: significant=${assessment.significant}, confidence=${assessment.confidence}, category=${assessment.category}`,
+      `AI assessment for ${url}: significant=${assessment.significant}, confidence=${assessment.confidence}, category=${assessment.category}, tokens=${inputTokens}/${outputTokens}, cost=$${usage.cost_usd.toFixed(4)}`,
     );
 
-    return assessment;
+    return { ...assessment, usage };
   } catch (err: any) {
     logger.error(`Failed to parse AI response for ${url}: ${text}`);
     return {
@@ -211,6 +275,7 @@ export async function assessChange(
         "Failed to parse AI response — flagging as significant for safety",
       ],
       category: "other",
+      usage,
     };
   }
 }

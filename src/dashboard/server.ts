@@ -6,6 +6,7 @@ import { setupRoutes } from "./routes";
 import { logger } from "../logger";
 import { getDb } from "../storage/db";
 import * as capture from "../capture";
+import { renderMetrics } from "../metrics";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pkg = require("../../package.json");
 
@@ -57,6 +58,22 @@ export function createDashboardApp(): express.Application {
   };
   app.get("/healthz", healthHandler);
   app.get("/readyz", healthHandler);
+
+  // Prometheus metrics — also before basic auth so scrapers don't need credentials.
+  // Firewall this port if the metrics are sensitive in your environment.
+  app.get("/metrics", async (_req, res) => {
+    try {
+      const body = await renderMetrics();
+      res.set("Content-Type", "text/plain; version=0.0.4");
+      res.send(body);
+    } catch (err) {
+      logger.error(`Failed to render /metrics: ${(err as Error).message}`);
+      res
+        .status(500)
+        .set("Content-Type", "text/plain; charset=utf-8")
+        .send(`# metrics unavailable: ${(err as Error).message}\n`);
+    }
+  });
 
   // Basic auth
   const rawUser = process.env.DASHBOARD_USER;

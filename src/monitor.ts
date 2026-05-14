@@ -3,13 +3,11 @@ import { loadConfig } from "./config";
 import { capturePage } from "./capture";
 import { compareScreenshots } from "./compare/pixel";
 import { compareText } from "./compare/text";
-import { assessChange } from "./compare/ai";
+import { assessChange, AssessChangeResult } from "./compare/ai";
 import { sendSlackAlert } from "./notify/slack";
 import { sendEmailAlert } from "./notify/email";
-import {
-  MonitoredUrl,
-  AiAssessment,
-} from "./types";
+import { notifyWebhook } from "./notify/webhook";
+import { MonitoredUrl, AiAssessment } from "./types";
 import {
   insertCapture,
   getReferenceCapture,
@@ -23,7 +21,7 @@ import { logger } from "./logger";
 
 export async function checkUrl(
   url: MonitoredUrl,
-  isBaseline = false
+  isBaseline = false,
 ): Promise<void> {
   const config = loadConfig();
 
@@ -39,7 +37,7 @@ export async function checkUrl(
     capture.screenshotPath,
     capture.textPath,
     capture.textContent,
-    isRef
+    isRef,
   );
 
   // If this is a baseline or first capture, set as reference and done
@@ -54,7 +52,7 @@ export async function checkUrl(
   const pixelResult = compareScreenshots(
     reference!.screenshot_path,
     capture.screenshotPath,
-    path.join(path.dirname(capture.screenshotPath), "diff.png")
+    path.join(path.dirname(capture.screenshotPath), "diff.png"),
   );
 
   const refText = readTextContent(reference!.text_path);
@@ -67,23 +65,23 @@ export async function checkUrl(
   if (belowThreshold) {
     updateUrlStatus(url.id, "ok");
     logger.info(
-      `${url.label}: below threshold (pixel: ${pixelResult.diffPercent.toFixed(2)}%, text: ${textResult.changedLineCount} lines) — no AI check`
+      `${url.label}: below threshold (pixel: ${pixelResult.diffPercent.toFixed(2)}%, text: ${textResult.changedLineCount} lines) — no AI check`,
     );
     return;
   }
 
   logger.info(
-    `${url.label}: above threshold (pixel: ${pixelResult.diffPercent.toFixed(2)}%, text: ${textResult.changedLineCount} lines) — running AI check`
+    `${url.label}: above threshold (pixel: ${pixelResult.diffPercent.toFixed(2)}%, text: ${textResult.changedLineCount} lines) — running AI check`,
   );
 
   // 4. Second-pass: AI assessment
-  let assessment: AiAssessment;
+  let assessment: AssessChangeResult;
   try {
     assessment = await assessChange(
       reference!.screenshot_path,
       capture.screenshotPath,
       textResult.diffSummary,
-      url.url
+      url.url,
     );
   } catch (err: any) {
     logger.error(`AI assessment failed for ${url.label}: ${err.message}`);
@@ -108,6 +106,9 @@ export async function checkUrl(
     ai_summary: assessment.summary,
     ai_details: assessment.details,
     ai_category: assessment.category,
+    input_tokens: assessment.usage?.input_tokens,
+    output_tokens: assessment.usage?.output_tokens,
+    ai_cost_usd: assessment.usage?.cost_usd,
   });
 
   if (!assessment.significant) {
@@ -132,7 +133,7 @@ export async function checkUrl(
       url,
       assessment,
       capture.screenshotPath,
-      reference!.screenshot_path
+      reference!.screenshot_path,
     );
     if (slackResult) {
       markEventNotified(changeEvent.id, slackResult.ts, slackResult.channel);
@@ -146,6 +147,8 @@ export async function checkUrl(
       markEventNotified(changeEvent.id);
     }
   }
+
+  await notifyWebhook(changeEvent, url, assessment);
 
   logger.info(`${url.label}: significant change detected and notified`);
 }
