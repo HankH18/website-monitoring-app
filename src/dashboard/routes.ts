@@ -15,11 +15,13 @@ import {
   acknowledgeEvent,
   muteUrl,
   unmuteUrl,
+  updateUrlSelectors,
 } from "../storage/db";
 import { checkUrl } from "../monitor";
 import { reschedule } from "../scheduler";
 import { logger } from "../logger";
 import path from "path";
+import fs from "fs";
 import crypto from "crypto";
 import dns from "dns/promises";
 import net from "net";
@@ -55,6 +57,30 @@ function isPrivateIp(ip: string): boolean {
     if (net.isIP(v4) === 4) return isPrivateIp(v4);
   }
   return false;
+}
+
+function safeReadText(p: string): string {
+  try {
+    return fs.readFileSync(p, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+function fileExists(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function parseSelectorTextarea(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 async function validatePublicUrl(raw: string): Promise<string | null> {
@@ -133,12 +159,49 @@ export function setupRoutes(app: Application): void {
     const events = getChangeEventsForUrl(id);
     const dataDir = getDataDir();
 
-    res.render("detail", { url, reference, latest, captures, events, dataDir });
+    const selectorViews: Array<{
+      index: number;
+      selector: string;
+      refText: string;
+      curText: string;
+      refImage: string | null;
+      curImage: string | null;
+    }> = [];
+    if (url.selectors && url.selectors.length > 0 && reference) {
+      const refDir = path.dirname(reference.screenshot_path);
+      const curDir = latest ? path.dirname(latest.screenshot_path) : null;
+      for (let i = 0; i < url.selectors.length; i++) {
+        const refTextPath = path.join(refDir, `selector_${i}.txt`);
+        const refImgPath = path.join(refDir, `selector_${i}.png`);
+        const curTextPath = curDir ? path.join(curDir, `selector_${i}.txt`) : "";
+        const curImgPath = curDir ? path.join(curDir, `selector_${i}.png`) : "";
+        const refText = safeReadText(refTextPath);
+        const curText = curDir ? safeReadText(curTextPath) : "";
+        selectorViews.push({
+          index: i,
+          selector: url.selectors[i],
+          refText,
+          curText,
+          refImage: fileExists(refImgPath) ? refImgPath : null,
+          curImage: curImgPath && fileExists(curImgPath) ? curImgPath : null,
+        });
+      }
+    }
+
+    res.render("detail", {
+      url,
+      reference,
+      latest,
+      captures,
+      events,
+      dataDir,
+      selectorViews,
+    });
   });
 
   // Add URL
   app.post("/url/add", async (req: Request, res: Response) => {
-    const { url, label } = req.body;
+    const { url, label, selectors } = req.body;
     if (!url || !label) return res.status(400).send("URL and label required");
 
     const validationError = await validatePublicUrl(url);
@@ -147,8 +210,21 @@ export function setupRoutes(app: Application): void {
       return res.status(400).send(validationError);
     }
 
-    upsertUrl(url, label);
+    const inserted = upsertUrl(url, label);
+    const parsedSelectors = parseSelectorTextarea(selectors);
+    updateUrlSelectors(inserted.id, parsedSelectors);
     res.redirect("/");
+  });
+
+  // Update selectors for an existing URL
+  app.post("/url/:id/selectors", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string);
+    const url = getUrlById(id);
+    if (!url) return res.status(404).send("URL not found");
+    const parsed = parseSelectorTextarea(req.body?.selectors);
+    updateUrlSelectors(id, parsed);
+    logger.info(`${url.label}: selectors updated (${parsed.length} selector(s))`);
+    res.redirect(`/url/${id}`);
   });
 
   // Delete URL

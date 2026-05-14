@@ -7,3 +7,4 @@ data/
 .claude/local/
 .claude/settings.local.json
 *.bak.[0-9]*
+.claude/scheduled_tasks.lock

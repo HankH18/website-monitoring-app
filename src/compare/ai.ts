@@ -26,11 +26,7 @@ function pricingForModel(model: string): { input: number; output: number } {
   return PRICING_PER_MTOK.sonnet;
 }
 
-function computeCostUsd(
-  model: string,
-  inputTokens: number,
-  outputTokens: number,
-): number {
+function computeCostUsd(model: string, inputTokens: number, outputTokens: number): number {
   const p = pricingForModel(model);
   return (inputTokens * p.input + outputTokens * p.output) / 1_000_000;
 }
@@ -168,6 +164,133 @@ function getClient(): Anthropic {
   return _client;
 }
 
+export interface SelectorImagePair {
+  selector: string;
+  referencePath: string;
+  currentPath: string;
+  textDiffScore: number;
+}
+
+export async function assessSelectorChange(
+  pairs: SelectorImagePair[],
+  textDiff: string,
+  url: string,
+): Promise<AssessChangeResult> {
+  const client = getClient();
+
+  // Cap at 3 selectors with highest text-diff scores
+  const ranked = [...pairs].sort((a, b) => b.textDiffScore - a.textDiffScore).slice(0, 3);
+
+  const imageBlocks: Array<{
+    type: "text" | "image";
+    text?: string;
+    source?: { type: "base64"; media_type: "image/png"; data: string };
+  }> = [
+    {
+      type: "text",
+      text: `Analyze changes to specific selectors on: ${url}\n\nThe site owner is monitoring specific page sections (not the whole page). Below are reference/current screenshot pairs for each monitored selector, followed by the text diff.\n\nText content diff per selector:\n\`\`\`\n${textDiff || "(no text changes)"}\n\`\`\``,
+    },
+  ];
+
+  for (const pair of ranked) {
+    try {
+      const [refB64, curB64] = await Promise.all([
+        loadAndResizeForAi(pair.referencePath),
+        loadAndResizeForAi(pair.currentPath),
+      ]);
+      imageBlocks.push({
+        type: "text",
+        text: `\nSelector "${pair.selector}" — reference then current:`,
+      });
+      imageBlocks.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: refB64 },
+      });
+      imageBlocks.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: curB64 },
+      });
+    } catch (err: any) {
+      logger.warn(`Skipping selector "${pair.selector}" image pair: ${err.message}`);
+    }
+  }
+
+  logger.info(`Sending AI selector assessment request for ${url} (${ranked.length} pair(s))`);
+
+  const response = await withRetry(
+    async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
+      try {
+        return await client.messages.create(
+          {
+            model: AI_MODEL,
+            max_tokens: 1024,
+            system: SYSTEM_PROMPT,
+            messages: [{ role: "user", content: imageBlocks as any }],
+          },
+          { signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    {
+      attempts: 3,
+      backoffMs: [1000, 3000],
+      retryable: isTransientAiError,
+      delayOverride: (err) => getRetryAfterMs(err),
+      onRetry: (err, attempt, delayMs) => {
+        const msg = (err as { message?: string })?.message ?? String(err);
+        logger.warn(
+          `AI selector assessment transient error for ${url} (attempt ${attempt}): ${msg} — retrying in ${delayMs}ms`,
+        );
+      },
+    },
+  );
+
+  return parseAiResponse(response, url);
+}
+
+function parseAiResponse(
+  response: {
+    content: Array<{ type: string; text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  },
+  url: string,
+): AssessChangeResult {
+  const text = response.content[0].type === "text" ? (response.content[0].text ?? "") : "";
+  const inputTokens = response.usage?.input_tokens ?? 0;
+  const outputTokens = response.usage?.output_tokens ?? 0;
+  const usage = {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    cost_usd: computeCostUsd(AI_MODEL, inputTokens, outputTokens),
+  };
+
+  try {
+    const jsonStr = text
+      .replace(/^```json?\s*\n?/i, "")
+      .replace(/\n?```\s*$/i, "")
+      .trim();
+    const assessment = JSON.parse(jsonStr) as AiAssessment;
+    logger.info(
+      `AI assessment for ${url}: significant=${assessment.significant}, confidence=${assessment.confidence}, category=${assessment.category}, tokens=${inputTokens}/${outputTokens}, cost=$${usage.cost_usd.toFixed(4)}`,
+    );
+    return { ...assessment, usage };
+  } catch {
+    logger.error(`Failed to parse AI response for ${url}: ${text}`);
+    return {
+      significant: true,
+      confidence: 0.5,
+      summary: `AI response could not be parsed. Raw: ${text.slice(0, 200)}`,
+      details: ["Failed to parse AI response — flagging as significant for safety"],
+      category: "other",
+      usage,
+    };
+  }
+}
+
 export async function assessChange(
   referenceScreenshotPath: string,
   currentScreenshotPath: string,
@@ -241,8 +364,7 @@ export async function assessChange(
     },
   );
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
 
   const inputTokens = response.usage?.input_tokens ?? 0;
   const outputTokens = response.usage?.output_tokens ?? 0;
@@ -271,9 +393,7 @@ export async function assessChange(
       significant: true,
       confidence: 0.5,
       summary: `AI response could not be parsed. Raw: ${text.slice(0, 200)}`,
-      details: [
-        "Failed to parse AI response — flagging as significant for safety",
-      ],
+      details: ["Failed to parse AI response — flagging as significant for safety"],
       category: "other",
       usage,
     };

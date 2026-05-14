@@ -1,12 +1,9 @@
-import { chromium, Browser } from "playwright";
+import { chromium, Browser, Page } from "playwright";
 import fs from "fs";
+import path from "path";
 import { loadConfig } from "./config";
-import { CaptureResult } from "./types";
-import {
-  ensureCaptureDir,
-  getScreenshotPath,
-  getTextPath,
-} from "./storage/files";
+import { CaptureResult, SelectorCapture } from "./types";
+import { ensureCaptureDir, getScreenshotPath, getTextPath } from "./storage/files";
 import { logger } from "./logger";
 import { withRetry } from "./util/retry";
 
@@ -72,7 +69,7 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-export async function capturePage(url: string): Promise<CaptureResult> {
+export async function capturePage(url: string, selectors: string[] = []): Promise<CaptureResult> {
   const config = loadConfig();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const captureDir = ensureCaptureDir(url, timestamp);
@@ -130,12 +127,10 @@ export async function capturePage(url: string): Promise<CaptureResult> {
           const el = node as HTMLElement;
           const tag = el.tagName.toLowerCase();
 
-          if (["script", "style", "noscript", "svg", "iframe"].includes(tag))
-            return "";
+          if (["script", "style", "noscript", "svg", "iframe"].includes(tag)) return "";
 
           const style = window.getComputedStyle(el);
-          if (style.display === "none" || style.visibility === "hidden")
-            return "";
+          if (style.display === "none" || style.visibility === "hidden") return "";
 
           // Strip Shopify-specific dynamic attributes
           const stripped = el.cloneNode(false) as HTMLElement;
@@ -182,16 +177,7 @@ export async function capturePage(url: string): Promise<CaptureResult> {
             } else if (tag.match(/^h[1-6]$/)) {
               prefix = `\n${tag.toUpperCase()}: `;
               suffix = "\n";
-            } else if (
-              [
-                "nav",
-                "main",
-                "header",
-                "footer",
-                "article",
-                "section",
-              ].includes(tag)
-            ) {
+            } else if (["nav", "main", "header", "footer", "article", "section"].includes(tag)) {
               prefix = `\n--- ${tag.toUpperCase()} ---\n`;
               suffix = `\n--- /${tag.toUpperCase()} ---\n`;
             }
@@ -222,6 +208,8 @@ export async function capturePage(url: string): Promise<CaptureResult> {
 
     fs.writeFileSync(textPath, textContent, "utf-8");
 
+    const selectorCaptures = await captureSelectors(page, captureDir, selectors);
+
     logger.info(`Captured ${url} -> ${captureDir}`);
 
     return {
@@ -230,6 +218,7 @@ export async function capturePage(url: string): Promise<CaptureResult> {
       textPath,
       timestamp,
       url,
+      selectors: selectorCaptures,
     };
   } catch (err: any) {
     logger.error(`Capture failed for ${url}: ${err.message}`);
@@ -253,4 +242,43 @@ export async function capturePage(url: string): Promise<CaptureResult> {
   } finally {
     await context.close();
   }
+}
+
+async function captureSelectors(
+  page: Page,
+  captureDir: string,
+  selectors: string[],
+): Promise<SelectorCapture[]> {
+  const results: SelectorCapture[] = [];
+  for (let i = 0; i < selectors.length; i++) {
+    const sel = selectors[i];
+    const textPath = path.join(captureDir, `selector_${i}.txt`);
+    const shotPath = path.join(captureDir, `selector_${i}.png`);
+    let text = "";
+    let matched = false;
+    try {
+      const locator = page.locator(sel).first();
+      const count = await page.locator(sel).count();
+      if (count > 0) {
+        matched = true;
+        try {
+          text = (await locator.innerText({ timeout: 5000 })).trim();
+        } catch (err: any) {
+          logger.warn(`Selector "${sel}" innerText failed: ${err.message}`);
+        }
+        try {
+          await locator.screenshot({ path: shotPath, timeout: 5000 });
+        } catch (err: any) {
+          logger.warn(`Selector "${sel}" screenshot failed: ${err.message}`);
+        }
+      } else {
+        logger.warn(`Selector "${sel}" matched zero elements`);
+      }
+    } catch (err: any) {
+      logger.warn(`Selector "${sel}" evaluation failed: ${err.message}`);
+    }
+    fs.writeFileSync(textPath, text, "utf-8");
+    results.push({ selector: sel, text, textPath, screenshotPath: shotPath, matched });
+  }
+  return results;
 }

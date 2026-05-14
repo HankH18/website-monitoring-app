@@ -90,15 +90,11 @@ function initSchema(db: Database.Database): void {
   addColumnIfMissing(db, "monitored_urls", "last_status_code", "INTEGER");
   addColumnIfMissing(db, "monitored_urls", "last_response_time_ms", "INTEGER");
   addColumnIfMissing(db, "monitored_urls", "ssl_not_after", "DATETIME");
-  addColumnIfMissing(
-    db,
-    "monitored_urls",
-    "consecutive_failures",
-    "INTEGER NOT NULL DEFAULT 0",
-  );
-  db.exec(
-    "UPDATE monitored_urls SET consecutive_failures = 0 WHERE consecutive_failures IS NULL",
-  );
+  addColumnIfMissing(db, "monitored_urls", "consecutive_failures", "INTEGER NOT NULL DEFAULT 0");
+  db.exec("UPDATE monitored_urls SET consecutive_failures = 0 WHERE consecutive_failures IS NULL");
+
+  // Selector-targeted monitoring
+  addColumnIfMissing(db, "monitored_urls", "selectors_json", "TEXT");
 }
 
 function addColumnIfMissing(
@@ -120,6 +116,22 @@ export function urlHash(url: string): string {
 
 // --- Monitored URLs ---
 
+function hydrateUrl(row: MonitoredUrl | undefined): MonitoredUrl | undefined {
+  if (!row) return row;
+  return { ...row, selectors: parseSelectorsJson(row.selectors_json ?? null) };
+}
+
+export function parseSelectorsJson(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((s): s is string => typeof s === "string" && s.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export function upsertUrl(url: string, label: string): MonitoredUrl {
   const db = getDb();
   const hash = urlHash(url);
@@ -127,21 +139,27 @@ export function upsertUrl(url: string, label: string): MonitoredUrl {
     `INSERT INTO monitored_urls (url, label, url_hash) VALUES (?, ?, ?)
      ON CONFLICT(url) DO UPDATE SET label = excluded.label`,
   ).run(url, label, hash);
-  return db
-    .prepare("SELECT * FROM monitored_urls WHERE url = ?")
-    .get(url) as MonitoredUrl;
+  return hydrateUrl(
+    db.prepare("SELECT * FROM monitored_urls WHERE url = ?").get(url) as MonitoredUrl,
+  ) as MonitoredUrl;
+}
+
+export function updateUrlSelectors(id: number, selectors: string[]): void {
+  const cleaned = selectors.map((s) => s.trim()).filter((s) => s.length > 0);
+  const json = cleaned.length === 0 ? null : JSON.stringify(cleaned);
+  getDb().prepare("UPDATE monitored_urls SET selectors_json = ? WHERE id = ?").run(json, id);
 }
 
 export function getAllUrls(): MonitoredUrl[] {
-  return getDb()
-    .prepare("SELECT * FROM monitored_urls ORDER BY id")
-    .all() as MonitoredUrl[];
+  const rows = getDb().prepare("SELECT * FROM monitored_urls ORDER BY id").all() as MonitoredUrl[];
+  return rows.map((r) => hydrateUrl(r) as MonitoredUrl);
 }
 
 export function getUrlById(id: number): MonitoredUrl | undefined {
-  return getDb()
-    .prepare("SELECT * FROM monitored_urls WHERE id = ?")
-    .get(id) as MonitoredUrl | undefined;
+  const row = getDb().prepare("SELECT * FROM monitored_urls WHERE id = ?").get(id) as
+    | MonitoredUrl
+    | undefined;
+  return hydrateUrl(row);
 }
 
 export function deleteUrl(id: number): void {
@@ -150,9 +168,7 @@ export function deleteUrl(id: number): void {
 
 export function updateUrlStatus(id: number, status: UrlStatus): void {
   getDb()
-    .prepare(
-      "UPDATE monitored_urls SET status = ?, last_checked = datetime('now') WHERE id = ?",
-    )
+    .prepare("UPDATE monitored_urls SET status = ?, last_checked = datetime('now') WHERE id = ?")
     .run(status, id);
 }
 
@@ -165,9 +181,7 @@ export function muteUrl(id: number, minutes: number): void {
 }
 
 export function unmuteUrl(id: number): void {
-  getDb()
-    .prepare("UPDATE monitored_urls SET muted_until = NULL WHERE id = ?")
-    .run(id);
+  getDb().prepare("UPDATE monitored_urls SET muted_until = NULL WHERE id = ?").run(id);
 }
 
 export function updateUrlUptime(
@@ -187,12 +201,7 @@ export function updateUrlUptime(
            ssl_not_after = ?,
            consecutive_failures = 0
        WHERE id = ?`,
-    ).run(
-      statusCode,
-      responseTimeMs,
-      sslNotAfter ? sslNotAfter.toISOString() : null,
-      id,
-    );
+    ).run(statusCode, responseTimeMs, sslNotAfter ? sslNotAfter.toISOString() : null, id);
     return 0;
   }
   db.prepare(
@@ -203,29 +212,21 @@ export function updateUrlUptime(
          ssl_not_after = ?,
          consecutive_failures = consecutive_failures + 1
      WHERE id = ?`,
-  ).run(
-    statusCode,
-    responseTimeMs,
-    sslNotAfter ? sslNotAfter.toISOString() : null,
-    id,
-  );
-  const row = db
-    .prepare("SELECT consecutive_failures FROM monitored_urls WHERE id = ?")
-    .get(id) as { consecutive_failures: number } | undefined;
+  ).run(statusCode, responseTimeMs, sslNotAfter ? sslNotAfter.toISOString() : null, id);
+  const row = db.prepare("SELECT consecutive_failures FROM monitored_urls WHERE id = ?").get(id) as
+    | { consecutive_failures: number }
+    | undefined;
   return row?.consecutive_failures ?? 0;
 }
 
 export function setUrlReference(urlId: number, captureId: number): void {
   const db = getDb();
-  db.prepare("UPDATE captures SET is_reference = 0 WHERE url_id = ?").run(
+  db.prepare("UPDATE captures SET is_reference = 0 WHERE url_id = ?").run(urlId);
+  db.prepare("UPDATE captures SET is_reference = 1 WHERE id = ?").run(captureId);
+  db.prepare("UPDATE monitored_urls SET reference_capture_id = ?, status = 'ok' WHERE id = ?").run(
+    captureId,
     urlId,
   );
-  db.prepare("UPDATE captures SET is_reference = 1 WHERE id = ?").run(
-    captureId,
-  );
-  db.prepare(
-    "UPDATE monitored_urls SET reference_capture_id = ?, status = 'ok' WHERE id = ?",
-  ).run(captureId, urlId);
 }
 
 // --- Captures ---
@@ -244,9 +245,7 @@ export function insertCapture(
        VALUES (?, ?, ?, ?, ?)`,
     )
     .run(urlId, screenshotPath, textPath, textContent, isReference ? 1 : 0);
-  return db
-    .prepare("SELECT * FROM captures WHERE id = ?")
-    .get(info.lastInsertRowid) as Capture;
+  return db.prepare("SELECT * FROM captures WHERE id = ?").get(info.lastInsertRowid) as Capture;
 }
 
 export function getReferenceCapture(urlId: number): Capture | undefined {
@@ -264,9 +263,7 @@ export function getLatestCapture(urlId: number): Capture | undefined {
 }
 
 export function getCaptureById(id: number): Capture | undefined {
-  return getDb().prepare("SELECT * FROM captures WHERE id = ?").get(id) as
-    | Capture
-    | undefined;
+  return getDb().prepare("SELECT * FROM captures WHERE id = ?").get(id) as Capture | undefined;
 }
 
 export function getCapturesForUrl(urlId: number, limit = 20): Capture[] {
@@ -321,15 +318,9 @@ export function insertChangeEvent(event: {
     .get(info.lastInsertRowid) as ChangeEvent;
 }
 
-export function markEventNotified(
-  eventId: number,
-  slackTs?: string,
-  slackChannel?: string,
-): void {
+export function markEventNotified(eventId: number, slackTs?: string, slackChannel?: string): void {
   getDb()
-    .prepare(
-      "UPDATE change_events SET notified = 1, slack_ts = ?, slack_channel = ? WHERE id = ?",
-    )
+    .prepare("UPDATE change_events SET notified = 1, slack_ts = ?, slack_channel = ? WHERE id = ?")
     .run(slackTs ?? null, slackChannel ?? null, eventId);
 }
 
@@ -342,9 +333,7 @@ export function acknowledgeEvent(eventId: number, via: string): void {
 }
 
 export function markReminderSent(eventId: number): void {
-  getDb()
-    .prepare("UPDATE change_events SET reminder_sent = 1 WHERE id = ?")
-    .run(eventId);
+  getDb().prepare("UPDATE change_events SET reminder_sent = 1 WHERE id = ?").run(eventId);
 }
 
 export function getUnacknowledgedEvents(): ChangeEvent[] {
@@ -357,14 +346,9 @@ export function getUnacknowledgedEvents(): ChangeEvent[] {
     .all() as ChangeEvent[];
 }
 
-export function getChangeEventsForUrl(
-  urlId: number,
-  limit = 50,
-): ChangeEvent[] {
+export function getChangeEventsForUrl(urlId: number, limit = 50): ChangeEvent[] {
   return getDb()
-    .prepare(
-      "SELECT * FROM change_events WHERE url_id = ? ORDER BY id DESC LIMIT ?",
-    )
+    .prepare("SELECT * FROM change_events WHERE url_id = ? ORDER BY id DESC LIMIT ?")
     .all(urlId, limit) as ChangeEvent[];
 }
 
@@ -374,10 +358,8 @@ export function getChangeEventById(id: number): ChangeEvent | undefined {
     | undefined;
 }
 
-export function getChangeEventBySlackTs(
-  slackTs: string,
-): ChangeEvent | undefined {
-  return getDb()
-    .prepare("SELECT * FROM change_events WHERE slack_ts = ?")
-    .get(slackTs) as ChangeEvent | undefined;
+export function getChangeEventBySlackTs(slackTs: string): ChangeEvent | undefined {
+  return getDb().prepare("SELECT * FROM change_events WHERE slack_ts = ?").get(slackTs) as
+    | ChangeEvent
+    | undefined;
 }
