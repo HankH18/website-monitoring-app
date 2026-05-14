@@ -54,7 +54,7 @@
       </form>
     <% } %>
   </div>
-  <div class="screenshots">
+  <div class="screenshots screenshots-3">
     <div class="screenshot-frame">
       <div class="frame-label">Reference (Baseline)</div>
       <img src="/screenshot/<%= reference.screenshot_path %>" alt="Reference screenshot">
@@ -65,7 +65,17 @@
       <img src="/screenshot/<%= latest.screenshot_path %>" alt="Latest screenshot">
       <div class="frame-meta">Captured: <%= latest.timestamp %></div>
     </div>
+    <div class="screenshot-frame">
+      <div class="frame-label">Diff</div>
+      <img
+        src="/screenshot/<%= latest.screenshot_path.replace(/screenshot\.png$/, 'diff.png') %>"
+        alt="Pixel diff"
+        onerror="this.outerHTML='&lt;div class=&quot;empty&quot; style=&quot;padding:32px 14px;font-size:12px;&quot;&gt;No diff available&lt;/div&gt;';">
+      <div class="frame-meta">Highlighted pixels changed vs. reference</div>
+    </div>
   </div>
+  <style>.screenshots-3 { grid-template-columns: 1fr 1fr 1fr; }
+    @media (max-width: 1024px) { .screenshots-3 { grid-template-columns: 1fr; } }</style>
 </div>
 <% } else { %>
 <div class="card">

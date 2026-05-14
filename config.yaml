@@ -9,8 +9,8 @@ delay_between_checks_ms: 3000
 
 # First-pass thresholds — skip AI check when changes are below these
 thresholds:
-  pixel_diff_percent: 2.0    # % of pixels that differ
-  text_change_lines: 0       # number of meaningful text lines changed
+  pixel_diff_percent: 2.0 # % of pixels that differ
+  text_change_lines: 0 # number of meaningful text lines changed
 
 # Acknowledgment timeout — reminder sent if no ack within this window (minutes)
 ack_timeout_minutes: 60
@@ -22,6 +22,12 @@ ack_check_interval_minutes: 5
 notifications:
   slack: true
   email: false
+  # Webhook notifier — set WEBHOOK_URL (and optionally WEBHOOK_SECRET) in env to enable.
+  # POSTs JSON to your endpoint on every significant change. Works with PagerDuty,
+  # Discord, Opsgenie, or any custom internal tool.
+  # webhook:
+  #   # url is read from $WEBHOOK_URL; leaving env unset disables the notifier
+  #   # HMAC signature header: X-Pageguard-Signature: sha256=<hex of body, keyed by WEBHOOK_SECRET>
 
 # Slack configuration
 slack:
@@ -29,8 +35,8 @@ slack:
 
 # Email configuration
 email:
-  provider: "smtp"          # "smtp" or "resend"
-  to: ""                    # recipient address
+  provider: "smtp" # "smtp" or "resend"
+  to: "" # recipient address
   from: "pageguard@example.com"
   smtp:
     host: "smtp.example.com"

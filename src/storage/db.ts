@@ -56,6 +56,9 @@ function initSchema(db: Database.Database): void {
       ai_summary TEXT,
       ai_details TEXT,
       ai_category TEXT,
+      input_tokens INTEGER,
+      output_tokens INTEGER,
+      ai_cost_usd REAL,
       notified INTEGER NOT NULL DEFAULT 0,
       acknowledged INTEGER NOT NULL DEFAULT 0,
       acknowledged_at TEXT,
@@ -73,6 +76,24 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_change_events_url_id ON change_events(url_id);
     CREATE INDEX IF NOT EXISTS idx_change_events_unacked ON change_events(acknowledged, notified);
   `);
+
+  // Migrations: add columns to change_events for existing databases. NULL for older rows.
+  addColumnIfMissing(db, "change_events", "input_tokens", "INTEGER");
+  addColumnIfMissing(db, "change_events", "output_tokens", "INTEGER");
+  addColumnIfMissing(db, "change_events", "ai_cost_usd", "REAL");
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
 export function urlHash(url: string): string {
@@ -86,19 +107,23 @@ export function upsertUrl(url: string, label: string): MonitoredUrl {
   const hash = urlHash(url);
   db.prepare(
     `INSERT INTO monitored_urls (url, label, url_hash) VALUES (?, ?, ?)
-     ON CONFLICT(url) DO UPDATE SET label = excluded.label`
+     ON CONFLICT(url) DO UPDATE SET label = excluded.label`,
   ).run(url, label, hash);
-  return db.prepare("SELECT * FROM monitored_urls WHERE url = ?").get(url) as MonitoredUrl;
+  return db
+    .prepare("SELECT * FROM monitored_urls WHERE url = ?")
+    .get(url) as MonitoredUrl;
 }
 
 export function getAllUrls(): MonitoredUrl[] {
-  return getDb().prepare("SELECT * FROM monitored_urls ORDER BY id").all() as MonitoredUrl[];
+  return getDb()
+    .prepare("SELECT * FROM monitored_urls ORDER BY id")
+    .all() as MonitoredUrl[];
 }
 
 export function getUrlById(id: number): MonitoredUrl | undefined {
-  return getDb().prepare("SELECT * FROM monitored_urls WHERE id = ?").get(id) as
-    | MonitoredUrl
-    | undefined;
+  return getDb()
+    .prepare("SELECT * FROM monitored_urls WHERE id = ?")
+    .get(id) as MonitoredUrl | undefined;
 }
 
 export function deleteUrl(id: number): void {
@@ -107,16 +132,22 @@ export function deleteUrl(id: number): void {
 
 export function updateUrlStatus(id: number, status: UrlStatus): void {
   getDb()
-    .prepare("UPDATE monitored_urls SET status = ?, last_checked = datetime('now') WHERE id = ?")
+    .prepare(
+      "UPDATE monitored_urls SET status = ?, last_checked = datetime('now') WHERE id = ?",
+    )
     .run(status, id);
 }
 
 export function setUrlReference(urlId: number, captureId: number): void {
   const db = getDb();
-  db.prepare("UPDATE captures SET is_reference = 0 WHERE url_id = ?").run(urlId);
-  db.prepare("UPDATE captures SET is_reference = 1 WHERE id = ?").run(captureId);
+  db.prepare("UPDATE captures SET is_reference = 0 WHERE url_id = ?").run(
+    urlId,
+  );
+  db.prepare("UPDATE captures SET is_reference = 1 WHERE id = ?").run(
+    captureId,
+  );
   db.prepare(
-    "UPDATE monitored_urls SET reference_capture_id = ?, status = 'ok' WHERE id = ?"
+    "UPDATE monitored_urls SET reference_capture_id = ?, status = 'ok' WHERE id = ?",
   ).run(captureId, urlId);
 }
 
@@ -127,21 +158,25 @@ export function insertCapture(
   screenshotPath: string,
   textPath: string,
   textContent: string,
-  isReference: boolean
+  isReference: boolean,
 ): Capture {
   const db = getDb();
   const info = db
     .prepare(
       `INSERT INTO captures (url_id, screenshot_path, text_path, text_content, is_reference)
-       VALUES (?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?)`,
     )
     .run(urlId, screenshotPath, textPath, textContent, isReference ? 1 : 0);
-  return db.prepare("SELECT * FROM captures WHERE id = ?").get(info.lastInsertRowid) as Capture;
+  return db
+    .prepare("SELECT * FROM captures WHERE id = ?")
+    .get(info.lastInsertRowid) as Capture;
 }
 
 export function getReferenceCapture(urlId: number): Capture | undefined {
   return getDb()
-    .prepare("SELECT * FROM captures WHERE url_id = ? AND is_reference = 1 ORDER BY id DESC LIMIT 1")
+    .prepare(
+      "SELECT * FROM captures WHERE url_id = ? AND is_reference = 1 ORDER BY id DESC LIMIT 1",
+    )
     .get(urlId) as Capture | undefined;
 }
 
@@ -152,7 +187,9 @@ export function getLatestCapture(urlId: number): Capture | undefined {
 }
 
 export function getCaptureById(id: number): Capture | undefined {
-  return getDb().prepare("SELECT * FROM captures WHERE id = ?").get(id) as Capture | undefined;
+  return getDb().prepare("SELECT * FROM captures WHERE id = ?").get(id) as
+    | Capture
+    | undefined;
 }
 
 export function getCapturesForUrl(urlId: number, limit = 20): Capture[] {
@@ -174,14 +211,18 @@ export function insertChangeEvent(event: {
   ai_summary?: string;
   ai_details?: string[];
   ai_category?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  ai_cost_usd?: number;
 }): ChangeEvent {
   const db = getDb();
   const info = db
     .prepare(
       `INSERT INTO change_events
         (url_id, capture_id, reference_capture_id, pixel_diff_percent, text_diff_count,
-         ai_significant, ai_confidence, ai_summary, ai_details, ai_category)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ai_significant, ai_confidence, ai_summary, ai_details, ai_category,
+         input_tokens, output_tokens, ai_cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       event.url_id,
@@ -193,15 +234,24 @@ export function insertChangeEvent(event: {
       event.ai_confidence ?? null,
       event.ai_summary ?? null,
       event.ai_details ? JSON.stringify(event.ai_details) : null,
-      event.ai_category ?? null
+      event.ai_category ?? null,
+      event.input_tokens ?? null,
+      event.output_tokens ?? null,
+      event.ai_cost_usd ?? null,
     );
-  return db.prepare("SELECT * FROM change_events WHERE id = ?").get(info.lastInsertRowid) as ChangeEvent;
+  return db
+    .prepare("SELECT * FROM change_events WHERE id = ?")
+    .get(info.lastInsertRowid) as ChangeEvent;
 }
 
-export function markEventNotified(eventId: number, slackTs?: string, slackChannel?: string): void {
+export function markEventNotified(
+  eventId: number,
+  slackTs?: string,
+  slackChannel?: string,
+): void {
   getDb()
     .prepare(
-      "UPDATE change_events SET notified = 1, slack_ts = ?, slack_channel = ? WHERE id = ?"
+      "UPDATE change_events SET notified = 1, slack_ts = ?, slack_channel = ? WHERE id = ?",
     )
     .run(slackTs ?? null, slackChannel ?? null, eventId);
 }
@@ -209,13 +259,15 @@ export function markEventNotified(eventId: number, slackTs?: string, slackChanne
 export function acknowledgeEvent(eventId: number, via: string): void {
   getDb()
     .prepare(
-      "UPDATE change_events SET acknowledged = 1, acknowledged_at = datetime('now'), acknowledged_via = ? WHERE id = ?"
+      "UPDATE change_events SET acknowledged = 1, acknowledged_at = datetime('now'), acknowledged_via = ? WHERE id = ?",
     )
     .run(via, eventId);
 }
 
 export function markReminderSent(eventId: number): void {
-  getDb().prepare("UPDATE change_events SET reminder_sent = 1 WHERE id = ?").run(eventId);
+  getDb()
+    .prepare("UPDATE change_events SET reminder_sent = 1 WHERE id = ?")
+    .run(eventId);
 }
 
 export function getUnacknowledgedEvents(): ChangeEvent[] {
@@ -223,14 +275,19 @@ export function getUnacknowledgedEvents(): ChangeEvent[] {
     .prepare(
       `SELECT * FROM change_events
        WHERE notified = 1 AND acknowledged = 0 AND ai_significant = 1
-       ORDER BY timestamp DESC`
+       ORDER BY timestamp DESC`,
     )
     .all() as ChangeEvent[];
 }
 
-export function getChangeEventsForUrl(urlId: number, limit = 50): ChangeEvent[] {
+export function getChangeEventsForUrl(
+  urlId: number,
+  limit = 50,
+): ChangeEvent[] {
   return getDb()
-    .prepare("SELECT * FROM change_events WHERE url_id = ? ORDER BY id DESC LIMIT ?")
+    .prepare(
+      "SELECT * FROM change_events WHERE url_id = ? ORDER BY id DESC LIMIT ?",
+    )
     .all(urlId, limit) as ChangeEvent[];
 }
 
@@ -240,7 +297,9 @@ export function getChangeEventById(id: number): ChangeEvent | undefined {
     | undefined;
 }
 
-export function getChangeEventBySlackTs(slackTs: string): ChangeEvent | undefined {
+export function getChangeEventBySlackTs(
+  slackTs: string,
+): ChangeEvent | undefined {
   return getDb()
     .prepare("SELECT * FROM change_events WHERE slack_ts = ?")
     .get(slackTs) as ChangeEvent | undefined;
