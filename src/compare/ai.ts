@@ -51,6 +51,56 @@ async function loadAndResizeForAi(imagePath: string): Promise<string> {
   return resized.toString("base64");
 }
 
+export interface DiffBbox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Crop to the given bbox (clamped to the actual image dimensions), then resize
+// within MAX_IMAGE_LONG_AXIS_PX. Throws if the bbox cannot be applied — the
+// caller is expected to fall back to the full-page path.
+async function loadCropAndResizeForAi(imagePath: string, bbox: DiffBbox): Promise<string> {
+  const buf = fs.readFileSync(imagePath);
+  const meta = await sharp(buf).metadata();
+  const imgW = meta.width ?? 0;
+  const imgH = meta.height ?? 0;
+  if (imgW <= 0 || imgH <= 0) {
+    throw new Error(`Invalid image dimensions for ${imagePath}: ${imgW}x${imgH}`);
+  }
+
+  // Clamp the bbox to the image bounds. The pixel-diff bbox is computed on a
+  // normalized canvas that may be larger than this specific image.
+  const x = Math.max(0, Math.min(bbox.x, imgW - 1));
+  const y = Math.max(0, Math.min(bbox.y, imgH - 1));
+  const width = Math.max(1, Math.min(bbox.width, imgW - x));
+  const height = Math.max(1, Math.min(bbox.height, imgH - y));
+
+  const cropped = await sharp(buf).extract({ left: x, top: y, width, height }).png().toBuffer();
+
+  const cropMeta = await sharp(cropped).metadata();
+  const longAxis = Math.max(cropMeta.width ?? 0, cropMeta.height ?? 0);
+  if (longAxis > 0 && longAxis <= MAX_IMAGE_LONG_AXIS_PX) {
+    return cropped.toString("base64");
+  }
+  const resized = await sharp(cropped)
+    .resize({
+      width: MAX_IMAGE_LONG_AXIS_PX,
+      height: MAX_IMAGE_LONG_AXIS_PX,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png()
+    .toBuffer();
+  return resized.toString("base64");
+}
+
+async function getImagePixelCount(imagePath: string): Promise<number> {
+  const meta = await sharp(fs.readFileSync(imagePath)).metadata();
+  return (meta.width ?? 0) * (meta.height ?? 0);
+}
+
 export interface AssessChangeResult extends AiAssessment {
   usage?: {
     input_tokens: number;
@@ -296,15 +346,53 @@ export async function assessChange(
   currentScreenshotPath: string,
   textDiff: string,
   url: string,
+  diffBbox?: DiffBbox,
 ): Promise<AssessChangeResult> {
   const client = getClient();
 
-  const [refBase64, curBase64] = await Promise.all([
-    loadAndResizeForAi(referenceScreenshotPath),
-    loadAndResizeForAi(currentScreenshotPath),
-  ]);
+  let usedCrop = false;
+  let refBase64: string;
+  let curBase64: string;
 
-  logger.info(`Sending AI assessment request for ${url}`);
+  if (diffBbox) {
+    try {
+      [refBase64, curBase64] = await Promise.all([
+        loadCropAndResizeForAi(referenceScreenshotPath, diffBbox),
+        loadCropAndResizeForAi(currentScreenshotPath, diffBbox),
+      ]);
+      usedCrop = true;
+
+      // Cost-savings telemetry: compare crop area against full image area.
+      try {
+        const fullPixels = await getImagePixelCount(currentScreenshotPath);
+        const cropPixels = diffBbox.width * diffBbox.height;
+        if (fullPixels > 0) {
+          const savingsPct = (1 - cropPixels / fullPixels) * 100;
+          logger.info(
+            `AI crop for ${url}: bbox=${diffBbox.width}x${diffBbox.height} at (${diffBbox.x},${diffBbox.y}), image_input_savings_pct=${savingsPct.toFixed(1)}`,
+          );
+        }
+      } catch {
+        // Telemetry is best-effort; ignore failures.
+      }
+    } catch (err: any) {
+      logger.warn(
+        `AI crop failed for ${url} (bbox=${JSON.stringify(diffBbox)}): ${err?.message ?? err} — falling back to full page`,
+      );
+      [refBase64, curBase64] = await Promise.all([
+        loadAndResizeForAi(referenceScreenshotPath),
+        loadAndResizeForAi(currentScreenshotPath),
+      ]);
+    }
+  } else {
+    [refBase64, curBase64] = await Promise.all([
+      loadAndResizeForAi(referenceScreenshotPath),
+      loadAndResizeForAi(currentScreenshotPath),
+    ]);
+  }
+
+  const cropNote = usedCrop ? " (showing only the changed region of the page)" : "";
+  logger.info(`Sending AI assessment request for ${url}${usedCrop ? " [cropped]" : ""}`);
 
   const response = await withRetry(
     async () => {
@@ -322,7 +410,7 @@ export async function assessChange(
                 content: [
                   {
                     type: "text",
-                    text: `Analyze changes to: ${url}\n\nText content diff:\n\`\`\`\n${textDiff || "(no text changes)"}\n\`\`\`\n\nBelow are the reference (baseline) screenshot followed by the current screenshot:`,
+                    text: `Analyze changes to: ${url}\n\nText content diff:\n\`\`\`\n${textDiff || "(no text changes)"}\n\`\`\`\n\nBelow are the reference (baseline) screenshot followed by the current screenshot${cropNote}:`,
                   },
                   {
                     type: "image",

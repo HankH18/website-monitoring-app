@@ -12,6 +12,7 @@ import { apiV1Router } from "../api/v1";
 const pkg = require("../../package.json");
 
 type CheckStatus = "ok" | "fail" | "not_started";
+type BrowserStatus = "ok" | "not_started" | "disconnected";
 
 function buildHealthPayload(): {
   body: Record<string, unknown>;
@@ -24,15 +25,7 @@ function buildHealthPayload(): {
     dbStatus = "fail";
   }
 
-  let browserStatus: CheckStatus = "not_started";
-  try {
-    const b = (capture as any)._browser ?? (capture as any).browser;
-    if (b && typeof b.isConnected === "function") {
-      browserStatus = b.isConnected() ? "ok" : "fail";
-    }
-  } catch {
-    browserStatus = "fail";
-  }
+  const browserStatus: BrowserStatus = capture.getBrowserStatus();
 
   return {
     dbOk: dbStatus === "ok",

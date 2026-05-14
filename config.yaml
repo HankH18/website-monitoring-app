@@ -68,3 +68,17 @@ urls:
     # notifications:
     #   slack: true
     #   email: true
+
+  # Form-login auth example (optional, per-URL). All fields are strings.
+  # Credentials are read from env vars at runtime — never store them here.
+  # - url: "https://admin.example.com/dashboard"
+  #   label: "Internal Admin"
+  #   auth:
+  #     type: form
+  #     login_url: "https://admin.example.com/login"
+  #     username_env: ADMIN_USER         # name of env var holding the username
+  #     password_env: ADMIN_PASS         # name of env var holding the password
+  #     username_selector: 'input[name="email"]'
+  #     password_selector: 'input[name="password"]'
+  #     submit_selector: 'button[type="submit"]'
+  #     success_check: 'text=Welcome'    # Playwright text= syntax OR a plain CSS selector
