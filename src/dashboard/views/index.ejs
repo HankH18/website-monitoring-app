@@ -75,9 +75,11 @@
           <td class="text-sm text-muted"><%= u.last_checked || 'Never' %></td>
           <td style="text-align:right;">
             <form method="POST" action="/url/<%= u.id %>/check" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-outline btn-sm">Check Now</button>
             </form>
             <form method="POST" action="/url/<%= u.id %>/delete" class="inline-form" onsubmit="return confirm('Remove <%= u.label %> from monitoring?');">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red);">Remove</button>
             </form>
           </td>
@@ -90,6 +92,7 @@
   <div class="divider"></div>
 
   <form method="POST" action="/url/add">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <div style="font-size:13px; font-weight:500; color:var(--text-muted); margin-bottom:8px;">Add a URL to monitor</div>
     <div class="form-row" style="margin-top:0;">
       <input type="url" name="url" placeholder="https://example.com" required>

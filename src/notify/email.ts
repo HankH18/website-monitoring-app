@@ -3,6 +3,25 @@ import { loadConfig } from "../config";
 import { ChangeEvent, MonitoredUrl, AiAssessment } from "../types";
 import { logger } from "../logger";
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeHref(u: string): string {
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return escapeHtml(u);
+    }
+  } catch {}
+  return "#";
+}
+
 let _transporter: nodemailer.Transporter | null = null;
 let _resend: any = null;
 
@@ -15,7 +34,9 @@ function getTransporter(): nodemailer.Transporter | null {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
     if (!user || !pass) {
-      logger.warn("SMTP credentials not configured — email notifications disabled");
+      logger.warn(
+        "SMTP credentials not configured — email notifications disabled",
+      );
       return null;
     }
     _transporter = nodemailer.createTransport({
@@ -47,7 +68,7 @@ async function getResendClient(): Promise<any> {
 export async function sendEmailAlert(
   event: ChangeEvent,
   url: MonitoredUrl,
-  assessment: AiAssessment
+  assessment: AiAssessment,
 ): Promise<boolean> {
   const config = loadConfig();
 
@@ -56,7 +77,10 @@ export async function sendEmailAlert(
     return false;
   }
 
-  const subject = `[PageGuard] Change detected: ${url.label}`;
+  const subject = `[PageGuard] Change detected: ${url.label}`.replace(
+    /[\r\n]+/g,
+    " ",
+  );
   const detailsList = assessment.details.map((d) => `  - ${d}`).join("\n");
 
   const textBody = `PageGuard — Change Detected
@@ -81,16 +105,16 @@ PageGuard Website Monitor`;
 
   const htmlBody = `
 <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-  <h2 style="color: #d32f2f;">Change Detected: ${url.label}</h2>
+  <h2 style="color: #d32f2f;">Change Detected: ${escapeHtml(url.label)}</h2>
   <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
-    <tr><td style="padding: 4px 8px; font-weight: bold;">URL:</td><td><a href="${url.url}">${url.url}</a></td></tr>
-    <tr><td style="padding: 4px 8px; font-weight: bold;">Category:</td><td>${assessment.category.replace("_", " ")}</td></tr>
+    <tr><td style="padding: 4px 8px; font-weight: bold;">URL:</td><td><a href="${safeHref(url.url)}">${escapeHtml(url.url)}</a></td></tr>
+    <tr><td style="padding: 4px 8px; font-weight: bold;">Category:</td><td>${escapeHtml(assessment.category.replace("_", " "))}</td></tr>
     <tr><td style="padding: 4px 8px; font-weight: bold;">Confidence:</td><td>${(assessment.confidence * 100).toFixed(0)}%</td></tr>
     <tr><td style="padding: 4px 8px; font-weight: bold;">Pixel Diff:</td><td>${event.pixel_diff_percent.toFixed(1)}%</td></tr>
   </table>
-  <p><strong>Summary:</strong> ${assessment.summary}</p>
+  <p><strong>Summary:</strong> ${escapeHtml(assessment.summary)}</p>
   <p><strong>Details:</strong></p>
-  <ul>${assessment.details.map((d) => `<li>${d}</li>`).join("")}</ul>
+  <ul>${assessment.details.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>
   <hr>
   <p style="color: #888; font-size: 12px;">To acknowledge this change, visit the PageGuard dashboard.<br>Email is notification-only.</p>
 </div>`;

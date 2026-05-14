@@ -5,7 +5,7 @@
 
 ## What this is
 
-TODO: 2–3 sentences. What does it do, who uses it, what's the deploy surface?
+Self-hosted visual-regression / website-change monitor. Playwright captures screenshots + DOM text on a cron, runs pixel + text diff, escalates non-trivial changes to Claude for an AI verdict, and notifies via Slack (interactive) or email. SQLite for state, EJS dashboard, Docker deploy. User is hank@decidethrive.com — solo operator, primarily monitoring own e-commerce sites.
 
 ## Stack
 
@@ -14,14 +14,24 @@ Node/TypeScript,Docker
 ## Build & test
 
 - Build: `npm run build`
-- Dev:   `npm run dev`
+- Dev: `npm run dev`
 
 ## Topology
 
 - `src/` — application code
-- `tests/` — test suite
+- `src/index.ts` — entrypoint (CLI flags `--baseline`, `--check`; otherwise boots scheduler + dashboard)
+- `src/scheduler.ts` — node-cron loop driving `runAllChecks`
+- `src/monitor.ts` — orchestrates one URL check (capture → compare → notify)
+- `src/capture.ts` — Playwright wrapper (screenshot + DOM text)
+- `src/compare/` — `pixel.ts`, `text.ts`, `ai.ts` (comparison pipeline)
+- `src/notify/` — `slack.ts`, `email.ts`
+- `src/storage/` — `db.ts` (SQLite via better-sqlite3), `files.ts` (capture file I/O)
+- `src/dashboard/` — Express + EJS (`server.ts`, `routes.ts`, `views/`)
+- `src/config.ts`, `src/logger.ts`, `src/types.ts`, `src/acknowledge.ts`
+- `config.yaml` — URL list + settings (loaded at startup; DB is runtime source of truth)
+- `data/` — runtime: SQLite DB (`pageguard.db`) + per-URL screenshot tree under `captures/` (gitignored)
 - `.claude/` — agent config (hooks, sub-agents, commands)
-- TODO: add the rest
+- `Dockerfile`, `docker-compose.yml` — deploy surface
 
 ## Conventions
 
@@ -63,4 +73,8 @@ See `.claude/MCP_SETUP.md` for copy-paste recipes (GitHub, Postgres, Context7, S
 <!-- - The `users` table has soft deletes (deleted_at); always filter unless told otherwise. -->
 <!-- - Integration tests need Postgres on port 5433 (`docker-compose up -d db`). -->
 
-TODO: Start populating after the first session. When Claude gets something wrong, document it here.
+1. **AI image inputs are full-page screenshots.** Multi-MB images get base64-encoded into every `assessChange` call. That's expensive in Anthropic tokens (priced by image area) and slow. Resize with Sharp to ≤1568px on the long axis before sending — full-page is fine for the dashboard and human review, but AI gets the cropped or resized version.
+
+2. **Reference-baseline can be poisoned by an errored capture.** In `src/monitor.ts`, when `isRef` is true the code inserts the capture and calls `setUrlReference` even if `capture.error` is set. An error screenshot becomes the baseline forever. Always check `capture.error` before promoting to reference; surface "baseline failed" in the dashboard instead.
+
+3. **Cron cycles can overlap and double-bill Anthropic.** `runAllChecks` is sequential and can exceed the cron interval. `node-cron` fires the next tick regardless, so two cycles run in parallel and every AI call gets duplicated. Add a "currently running" mutex in `src/scheduler.ts` and skip (don't queue) the next tick if one's already in flight.

@@ -33,9 +33,11 @@
 
   <div class="actions">
     <form method="POST" action="/url/<%= url.id %>/check" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <button type="submit" class="btn btn-primary">Run Check Now</button>
     </form>
     <form method="POST" action="/url/<%= url.id %>/baseline" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <button type="submit" class="btn btn-outline">Capture New Baseline</button>
     </form>
   </div>
@@ -47,6 +49,7 @@
     <h2>Visual Comparison</h2>
     <% if (latest.id !== reference.id) { %>
       <form method="POST" action="/url/<%= url.id %>/set-reference/<%= latest.id %>" class="inline-form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <button type="submit" class="btn btn-success btn-sm">Accept Latest as Baseline</button>
       </form>
     <% } %>
@@ -118,10 +121,12 @@
         <td style="text-align:right;">
           <% if (e.ai_significant === 1 && !e.acknowledged) { %>
             <form method="POST" action="/event/<%= e.id %>/acknowledge" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-success btn-sm">Acknowledge</button>
             </form>
           <% } %>
           <form method="POST" action="/url/<%= url.id %>/set-reference/<%= e.capture_id %>" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
             <button type="submit" class="btn btn-ghost btn-sm">Set as Ref</button>
           </form>
         </td>
@@ -164,6 +169,7 @@
         <td style="text-align:right;">
           <% if (!c.is_reference) { %>
             <form method="POST" action="/url/<%= url.id %>/set-reference/<%= c.id %>" class="inline-form">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-outline btn-sm">Set as Reference</button>
             </form>
           <% } %>

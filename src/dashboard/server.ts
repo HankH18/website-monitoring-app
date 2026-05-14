@@ -13,15 +13,32 @@ export function createDashboardApp(): express.Application {
   app.use(express.urlencoded({ extended: true }));
 
   // Basic auth
-  const user = process.env.DASHBOARD_USER || "admin";
-  const pass = process.env.DASHBOARD_PASS || "changeme";
+  const rawUser = process.env.DASHBOARD_USER;
+  const rawPass = process.env.DASHBOARD_PASS;
+  const isProd = process.env.NODE_ENV === "production";
+  const insecure = !rawUser || !rawPass || rawPass === "changeme";
+
+  if (insecure) {
+    if (isProd) {
+      logger.error(
+        "Refusing to start: DASHBOARD_USER/DASHBOARD_PASS must be set to non-default values in production.",
+      );
+      process.exit(1);
+    }
+    logger.warn(
+      "Dashboard is using insecure default credentials. Set DASHBOARD_USER and DASHBOARD_PASS before deploying.",
+    );
+  }
+
+  const user = rawUser || "admin";
+  const pass = rawPass || "changeme";
 
   app.use(
     basicAuth({
       users: { [user]: pass },
       challenge: true,
       realm: "PageGuard Dashboard",
-    })
+    }),
   );
 
   // View engine

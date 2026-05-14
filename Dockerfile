@@ -1,7 +1,27 @@
-FROM node:20-slim
+# syntax=docker/dockerfile:1.6
 
-# Install Playwright system dependencies
-RUN apt-get update && apt-get install -y \
+FROM node:20-slim AS builder
+
+# better-sqlite3 builds from source via node-gyp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 g++ make \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src/ ./src/
+
+RUN npm run build \
+    && cp -r src/dashboard/views dist/dashboard/views
+
+
+FROM node:20-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
     libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
     libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
@@ -11,27 +31,28 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install dependencies
-COPY package.json package-lock.json* ./
-RUN npm install
+ENV NODE_ENV=production
 
-# Install Playwright browsers (Chromium only)
-RUN npx playwright install chromium
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-# Copy source
-COPY tsconfig.json ./
-COPY src/ ./src/
-COPY config.yaml ./
+COPY --from=builder /app/dist ./dist
 
-# Build TypeScript
-RUN npm run build
+# Install Chromium as root so the binary lives in /root/.cache; move it to
+# node's home and re-own so the non-root user can launch it at runtime.
+RUN npx playwright install chromium \
+    && mkdir -p /home/node/.cache \
+    && mv /root/.cache/ms-playwright /home/node/.cache/ms-playwright \
+    && mkdir -p /app/data \
+    && chown -R node:node /app /home/node/.cache
 
-# Copy EJS views to dist (not compiled by tsc)
-RUN cp -r src/dashboard/views dist/dashboard/views
-
-# Data volume
-VOLUME ["/app/data"]
+USER node
 
 EXPOSE 3000
+
+VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000', r => process.exit(r.statusCode === 401 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "dist/index.js"]
