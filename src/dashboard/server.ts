@@ -8,8 +8,7 @@ import { getDb } from "../storage/db";
 import * as capture from "../capture";
 import { renderMetrics } from "../metrics";
 import { apiV1Router } from "../api/v1";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json");
+import pkg from "../../package.json";
 
 type CheckStatus = "ok" | "fail" | "not_started";
 type BrowserStatus = "ok" | "not_started" | "disconnected";

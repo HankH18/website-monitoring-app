@@ -142,12 +142,13 @@ export async function checkUrl(url: MonitoredUrl, isBaseline = false): Promise<v
         diffBbox ?? undefined,
       );
     }
-  } catch (err: any) {
-    logger.error(`AI assessment failed for ${url.label}: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`AI assessment failed for ${url.label}: ${msg}`);
     assessment = {
       significant: true,
       confidence: 0.5,
-      summary: `AI assessment failed: ${err.message}`,
+      summary: `AI assessment failed: ${msg}`,
       details: ["AI check failed — flagging for manual review"],
       category: "other",
     };
@@ -179,10 +180,16 @@ export async function checkUrl(url: MonitoredUrl, isBaseline = false): Promise<v
   // 6. Notify
   updateUrlStatus(url.id, "change_detected");
 
+  // `notifications` is a per-URL override coming from config.yaml. It is not
+  // persisted on the DB row, so we cast through `unknown` to read it off the
+  // ad-hoc shape the scheduler attaches.
+  const perUrlNotifications =
+    (url as unknown as { notifications?: { slack?: boolean; email?: boolean } }).notifications ||
+    {};
   const urlNotifConfig = {
     slack: config.notifications.slack,
     email: config.notifications.email,
-    ...((url as any).notifications || {}),
+    ...perUrlNotifications,
   };
 
   // Slack notification

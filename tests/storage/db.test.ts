@@ -49,13 +49,7 @@ describe("storage/db", () => {
 
   it("marks a capture as the reference and retrieves it", () => {
     const url = db.upsertUrl("https://example.com", "Example");
-    const capture = db.insertCapture(
-      url.id,
-      "/tmp/shot.png",
-      "/tmp/text.txt",
-      "hello",
-      false,
-    );
+    const capture = db.insertCapture(url.id, "/tmp/shot.png", "/tmp/text.txt", "hello", false);
 
     db.setUrlReference(url.id, capture.id);
 
@@ -71,34 +65,17 @@ describe("storage/db", () => {
 
   it("setUrlReference ensures only one capture per URL is the reference", () => {
     const url = db.upsertUrl("https://example.com", "Example");
-    const cap1 = db.insertCapture(
-      url.id,
-      "/tmp/a.png",
-      "/tmp/a.txt",
-      "v1",
-      true,
-    );
-    const cap2 = db.insertCapture(
-      url.id,
-      "/tmp/b.png",
-      "/tmp/b.txt",
-      "v2",
-      false,
-    );
-    const cap3 = db.insertCapture(
-      url.id,
-      "/tmp/c.png",
-      "/tmp/c.txt",
-      "v3",
-      false,
-    );
+    const cap1 = db.insertCapture(url.id, "/tmp/a.png", "/tmp/a.txt", "v1", true);
+    const cap2 = db.insertCapture(url.id, "/tmp/b.png", "/tmp/b.txt", "v2", false);
+    const cap3 = db.insertCapture(url.id, "/tmp/c.png", "/tmp/c.txt", "v3", false);
+
+    // cap1 was inserted as the initial reference; promoting cap2 must demote it.
+    expect(db.getReferenceCapture(url.id)?.id).toBe(cap1.id);
 
     db.setUrlReference(url.id, cap2.id);
 
     const captures = db.getCapturesForUrl(url.id);
-    const referenceCount = captures.filter((c) =>
-      Boolean(c.is_reference),
-    ).length;
+    const referenceCount = captures.filter((c) => Boolean(c.is_reference)).length;
     expect(referenceCount).toBe(1);
 
     const ref = db.getReferenceCapture(url.id);

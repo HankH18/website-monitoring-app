@@ -18,12 +18,28 @@ function safeHref(u: string): string {
     if (parsed.protocol === "http:" || parsed.protocol === "https:") {
       return escapeHtml(u);
     }
-  } catch {}
+  } catch {
+    // Malformed URL — fall through to the safe placeholder.
+  }
   return "#";
 }
 
+// Minimal shape used from the Resend client. Imported lazily, so we describe
+// only the surface we touch rather than pulling the SDK type in eagerly.
+interface ResendLike {
+  emails: {
+    send: (msg: {
+      from: string;
+      to: string;
+      subject: string;
+      text: string;
+      html: string;
+    }) => Promise<unknown>;
+  };
+}
+
 let _transporter: nodemailer.Transporter | null = null;
-let _resend: any = null;
+let _resend: ResendLike | null = null;
 
 function getTransporter(): nodemailer.Transporter | null {
   if (_transporter) return _transporter;
@@ -34,9 +50,7 @@ function getTransporter(): nodemailer.Transporter | null {
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
     if (!user || !pass) {
-      logger.warn(
-        "SMTP credentials not configured — email notifications disabled",
-      );
+      logger.warn("SMTP credentials not configured — email notifications disabled");
       return null;
     }
     _transporter = nodemailer.createTransport({
@@ -51,7 +65,7 @@ function getTransporter(): nodemailer.Transporter | null {
   return null;
 }
 
-async function getResendClient(): Promise<any> {
+async function getResendClient(): Promise<ResendLike | null> {
   if (_resend) return _resend;
 
   const key = process.env.RESEND_API_KEY;
@@ -61,7 +75,7 @@ async function getResendClient(): Promise<any> {
   }
 
   const { Resend } = await import("resend");
-  _resend = new Resend(key);
+  _resend = new Resend(key) as unknown as ResendLike;
   return _resend;
 }
 
@@ -77,10 +91,7 @@ export async function sendEmailAlert(
     return false;
   }
 
-  const subject = `[PageGuard] Change detected: ${url.label}`.replace(
-    /[\r\n]+/g,
-    " ",
-  );
+  const subject = `[PageGuard] Change detected: ${url.label}`.replace(/[\r\n]+/g, " ");
   const detailsList = assessment.details.map((d) => `  - ${d}`).join("\n");
 
   const textBody = `PageGuard — Change Detected
@@ -146,8 +157,9 @@ PageGuard Website Monitor`;
 
     logger.info(`Email alert sent for ${url.label} to ${config.email.to}`);
     return true;
-  } catch (err: any) {
-    logger.error(`Failed to send email alert: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to send email alert: ${msg}`);
     return false;
   }
 }

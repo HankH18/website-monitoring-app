@@ -9,7 +9,6 @@ import {
   getChangeEventById,
   getUrlById,
   setUrlReference,
-  getCaptureById,
 } from "../storage/db";
 import { logger } from "../logger";
 import { withRetry } from "../util/retry";
@@ -64,15 +63,13 @@ export function getSlackApp(): App | null {
   return _app;
 }
 
-export function initSlackApp(expressApp?: any): App | null {
+export function initSlackApp(): App | null {
   const token = process.env.SLACK_BOT_TOKEN;
   const signingSecret = process.env.SLACK_SIGNING_SECRET;
   const appToken = process.env.SLACK_APP_TOKEN;
 
   if (!token || !signingSecret) {
-    logger.warn(
-      "Slack credentials not configured — Slack notifications disabled",
-    );
+    logger.warn("Slack credentials not configured — Slack notifications disabled");
     return null;
   }
 
@@ -89,8 +86,12 @@ export function initSlackApp(expressApp?: any): App | null {
   _app.action("mark_intentional", async ({ ack, body, client }) => {
     await ack();
 
-    const action = body as any;
-    const value = JSON.parse(action.actions[0].value);
+    // Bolt's BlockAction payload shape — we only need actions[0].value and user.id.
+    const blockAction = body as {
+      actions: Array<{ value: string }>;
+      user: { id: string };
+    };
+    const value = JSON.parse(blockAction.actions[0].value);
     const eventId = value.event_id as number;
 
     const event = getChangeEventById(eventId);
@@ -112,19 +113,20 @@ export function initSlackApp(expressApp?: any): App | null {
       await client.chat.update({
         channel: event.slack_channel!,
         ts: event.slack_ts!,
-        text: `Change on ${url?.label || url?.url} marked as intentional by <@${(body as any).user.id}>. Reference updated.`,
+        text: `Change on ${url?.label || url?.url} marked as intentional by <@${blockAction.user.id}>. Reference updated.`,
         blocks: [
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `✅ *Marked as intentional* by <@${(body as any).user.id}>\nReference updated for *${url?.label || url?.url}*`,
+              text: `✅ *Marked as intentional* by <@${blockAction.user.id}>\nReference updated for *${url?.label || url?.url}*`,
             },
           },
         ],
       });
-    } catch (err: any) {
-      logger.error(`Failed to update Slack message: ${err.message}`);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Failed to update Slack message: ${errMsg}`);
     }
 
     logger.info(`Event ${eventId} acknowledged via Slack button`);
@@ -132,7 +134,13 @@ export function initSlackApp(expressApp?: any): App | null {
 
   // Handle thread reply with "approved"
   _app.message(/approved/i, async ({ message, client }) => {
-    const msg = message as any;
+    // Slack message events are a discriminated union; we narrow to the user-reply
+    // subtype that carries thread_ts/user/channel.
+    const msg = message as {
+      thread_ts?: string;
+      user?: string;
+      channel: string;
+    };
     if (!msg.thread_ts) return; // only handle threaded replies
 
     const event = getChangeEventBySlackTs(msg.thread_ts);
@@ -194,8 +202,9 @@ export async function sendSlackAlert(
   const webClient = _webClient;
 
   try {
-    // Upload before/after screenshots
-    const refUpload = await slackCall("files.uploadV2 (reference)", () =>
+    // Upload before/after screenshots — uploadV2 posts them into the channel as
+    // a side effect; we don't need the response objects.
+    await slackCall("files.uploadV2 (reference)", () =>
       webClient.files.uploadV2({
         channel_id: channel,
         file: fs.readFileSync(referenceScreenshotPath),
@@ -204,7 +213,7 @@ export async function sendSlackAlert(
       }),
     );
 
-    const curUpload = await slackCall("files.uploadV2 (current)", () =>
+    await slackCall("files.uploadV2 (current)", () =>
       webClient.files.uploadV2({
         channel_id: channel,
         file: fs.readFileSync(currentScreenshotPath),
@@ -293,16 +302,14 @@ export async function sendSlackAlert(
 
     logger.info(`Slack alert sent for ${url.label} (ts: ${ts})`);
     return { ts, channel };
-  } catch (err: any) {
-    logger.error(`Failed to send Slack alert: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to send Slack alert: ${msg}`);
     return null;
   }
 }
 
-export async function sendSlackReminder(
-  event: ChangeEvent,
-  url: MonitoredUrl,
-): Promise<void> {
+export async function sendSlackReminder(event: ChangeEvent, url: MonitoredUrl): Promise<void> {
   if (!_webClient || !event.slack_ts || !event.slack_channel) return;
   const webClient = _webClient;
 
@@ -315,7 +322,8 @@ export async function sendSlackReminder(
       }),
     );
     logger.info(`Reminder sent for event ${event.id}`);
-  } catch (err: any) {
-    logger.error(`Failed to send Slack reminder: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to send Slack reminder: ${msg}`);
   }
 }

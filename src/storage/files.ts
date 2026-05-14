@@ -7,12 +7,7 @@ import { logger } from "../logger";
 
 export function ensureCaptureDir(url: string, timestamp: string): string {
   const hash = urlHash(url);
-  const dir = path.join(
-    getDataDir(),
-    "captures",
-    hash,
-    timestamp.replace(/[: ]/g, "-"),
-  );
+  const dir = path.join(getDataDir(), "captures", hash, timestamp.replace(/[: ]/g, "-"));
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -57,9 +52,7 @@ export function cleanupOldCaptures(): CleanupResult {
 
   for (const url of urls) {
     const recent = db
-      .prepare(
-        "SELECT id FROM captures WHERE url_id = ? ORDER BY id DESC LIMIT ?",
-      )
+      .prepare("SELECT id FROM captures WHERE url_id = ? ORDER BY id DESC LIMIT ?")
       .all(url.id, keepPerUrl) as { id: number }[];
 
     const unackedCaptureIds = db
@@ -85,9 +78,11 @@ export function cleanupOldCaptures(): CleanupResult {
           const stat = fs.statSync(p);
           bytesFreed += stat.size;
           fs.unlinkSync(p);
-        } catch (err: any) {
-          if (err.code !== "ENOENT") {
-            logger.warn(`cleanup: failed to remove ${p}: ${err.message}`);
+        } catch (err: unknown) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT") {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.warn(`cleanup: failed to remove ${p}: ${msg}`);
           }
         }
       }

@@ -135,6 +135,9 @@ export interface ChangeEvent {
   ai_summary: string | null;
   ai_details: string | null;
   ai_category: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  ai_cost_usd?: number | null;
   notified: boolean;
   acknowledged: boolean;
   acknowledged_at: string | null;

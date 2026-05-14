@@ -116,7 +116,9 @@ export function setupRoutes(app: Application): void {
   const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     getSecret: () => csrfSecret,
     getSessionIdentifier: (req: Request) => {
-      const user = (req as any).auth?.user || req.headers["authorization"] || "anonymous";
+      // Basic-auth middleware (express-basic-auth) attaches `auth` to the request.
+      const reqWithAuth = req as Request & { auth?: { user?: string } };
+      const user = reqWithAuth.auth?.user || req.headers["authorization"] || "anonymous";
       return String(user);
     },
     cookieName: process.env.NODE_ENV === "production" ? "__Host-pg.csrf" : "pg.csrf",
@@ -129,7 +131,8 @@ export function setupRoutes(app: Application): void {
     getCsrfTokenFromRequest: (req: Request) => {
       const header = req.headers["x-csrf-token"];
       if (typeof header === "string" && header.length > 0) return header;
-      return (req.body && (req.body as any)._csrf) as string | undefined;
+      const body = req.body as { _csrf?: unknown } | undefined;
+      return typeof body?._csrf === "string" ? body._csrf : undefined;
     },
   });
 
@@ -243,9 +246,10 @@ export function setupRoutes(app: Application): void {
     try {
       await checkUrl(url);
       res.redirect(`/url/${id}`);
-    } catch (err: any) {
-      logger.error(`Manual check failed: ${err.message}`);
-      res.status(500).send(`Check failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Manual check failed: ${msg}`);
+      res.status(500).send(`Check failed: ${msg}`);
     }
   });
 
@@ -284,9 +288,10 @@ export function setupRoutes(app: Application): void {
     try {
       await checkUrl(url, true);
       res.redirect(`/url/${id}`);
-    } catch (err: any) {
-      logger.error(`Baseline capture failed: ${err.message}`);
-      res.status(500).send(`Baseline failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Baseline capture failed: ${msg}`);
+      res.status(500).send(`Baseline failed: ${msg}`);
     }
   });
 
@@ -366,12 +371,13 @@ export function setupRoutes(app: Application): void {
 
       const config = loadConfig();
       res.render("settings", { config, flash: "Settings saved successfully." });
-    } catch (err: any) {
-      logger.error(`Settings update failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Settings update failed: ${msg}`);
       const config = loadConfig();
       res.render("settings", {
         config,
-        error: `Failed to save: ${err.message}`,
+        error: `Failed to save: ${msg}`,
       });
     }
   });
@@ -386,8 +392,9 @@ export function setupRoutes(app: Application): void {
     try {
       reloadConfig();
       res.json({ ok: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -396,9 +403,10 @@ export function setupRoutes(app: Application): void {
     try {
       const result = cleanupOldCaptures();
       res.json(result);
-    } catch (err: any) {
-      logger.error(`Cleanup failed: ${err.message}`);
-      res.status(500).json({ error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Cleanup failed: ${msg}`);
+      res.status(500).json({ error: msg });
     }
   });
 

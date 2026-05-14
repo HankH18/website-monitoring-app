@@ -14,7 +14,9 @@ export async function getBrowser(): Promise<Browser> {
   if (_browser) {
     try {
       await _browser.close();
-    } catch {}
+    } catch {
+      // Already disconnected or closing — we will replace below.
+    }
     _browser = null;
   }
   _browser = await chromium.launch({
@@ -107,7 +109,9 @@ export async function capturePage(
         const errorText = `ERROR: auth failed: ${authErr}`;
         try {
           await page.screenshot({ path: screenshotPath, fullPage: false });
-        } catch {}
+        } catch {
+          // Best-effort screenshot after auth failure; ignore if page is unusable.
+        }
         fs.writeFileSync(textPath, errorText, "utf-8");
         logger.error(`Capture auth failed for ${url}: ${authErr}`);
         return {
@@ -252,15 +256,18 @@ export async function capturePage(
       url,
       selectors: selectorCaptures,
     };
-  } catch (err: any) {
-    logger.error(`Capture failed for ${url}: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Capture failed for ${url}: ${msg}`);
 
     // Save error state screenshot if possible
     try {
       await page.screenshot({ path: screenshotPath, fullPage: false });
-    } catch {}
+    } catch {
+      // Best-effort error-state screenshot; the page may already be closed.
+    }
 
-    const errorText = `ERROR: ${err.message}`;
+    const errorText = `ERROR: ${msg}`;
     fs.writeFileSync(textPath, errorText, "utf-8");
 
     return {
@@ -269,7 +276,7 @@ export async function capturePage(
       textPath,
       timestamp,
       url,
-      error: err.message,
+      error: msg,
     };
   } finally {
     await context.close();
@@ -289,8 +296,8 @@ async function performFormLogin(page: Page, auth: FormAuthConfig): Promise<strin
     await page.locator(auth.submit_selector).click({ timeout: 10000 });
     await page.locator(auth.success_check).waitFor({ state: "visible", timeout: 15000 });
     return null;
-  } catch (err: any) {
-    return err?.message ?? String(err);
+  } catch (err: unknown) {
+    return err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -313,19 +320,22 @@ async function captureSelectors(
         matched = true;
         try {
           text = (await locator.innerText({ timeout: 5000 })).trim();
-        } catch (err: any) {
-          logger.warn(`Selector "${sel}" innerText failed: ${err.message}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn(`Selector "${sel}" innerText failed: ${msg}`);
         }
         try {
           await locator.screenshot({ path: shotPath, timeout: 5000 });
-        } catch (err: any) {
-          logger.warn(`Selector "${sel}" screenshot failed: ${err.message}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn(`Selector "${sel}" screenshot failed: ${msg}`);
         }
       } else {
         logger.warn(`Selector "${sel}" matched zero elements`);
       }
-    } catch (err: any) {
-      logger.warn(`Selector "${sel}" evaluation failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Selector "${sel}" evaluation failed: ${msg}`);
     }
     fs.writeFileSync(textPath, text, "utf-8");
     results.push({ selector: sel, text, textPath, screenshotPath: shotPath, matched });

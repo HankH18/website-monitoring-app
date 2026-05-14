@@ -16,8 +16,7 @@ import {
 import { checkUrl } from "../monitor";
 import { logger } from "../logger";
 import { ChangeEvent, MonitoredUrl } from "../types";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json");
+import pkg from "../../package.json";
 
 function isPrivateIp(ip: string): boolean {
   const family = net.isIP(ip);
@@ -170,9 +169,9 @@ function serializeEvent(e: ChangeEvent): Record<string, unknown> {
       summary: e.ai_summary,
       details: aiDetails,
       category: e.ai_category,
-      input_tokens: (e as any).input_tokens ?? null,
-      output_tokens: (e as any).output_tokens ?? null,
-      cost_usd: (e as any).ai_cost_usd ?? null,
+      input_tokens: e.input_tokens ?? null,
+      output_tokens: e.output_tokens ?? null,
+      cost_usd: e.ai_cost_usd ?? null,
     },
     notified: !!e.notified,
     acknowledged: !!e.acknowledged,
@@ -185,7 +184,7 @@ function serializeEvent(e: ChangeEvent): Record<string, unknown> {
 export const apiV1Router: Router = express.Router();
 
 // Mark this router so a CSRF middleware can skip it cleanly if mounted globally.
-(apiV1Router as any).csrfExempt = true;
+(apiV1Router as Router & { csrfExempt?: boolean }).csrfExempt = true;
 
 apiV1Router.use(express.json());
 apiV1Router.use(bearerAuth);
@@ -268,9 +267,10 @@ apiV1Router.post("/urls/:id/check", async (req: Request, res: Response) => {
 
   try {
     await checkUrl(url);
-  } catch (err: any) {
-    logger.error(`API manual check failed for url ${id}: ${err.message}`);
-    return jsonError(res, 500, `Check failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`API manual check failed for url ${id}: ${msg}`);
+    return jsonError(res, 500, `Check failed: ${msg}`);
   }
 
   const db = getDb();
@@ -337,10 +337,8 @@ apiV1Router.post("/events/:id/acknowledge", (req: Request, res: Response) => {
   const event = getChangeEventById(id);
   if (!event) return jsonError(res, 404, "Event not found");
 
-  const via =
-    typeof (body as any).via === "string" && (body as any).via.length > 0
-      ? (body as any).via
-      : "api";
+  const bodyObj = body as { via?: unknown };
+  const via = typeof bodyObj.via === "string" && bodyObj.via.length > 0 ? bodyObj.via : "api";
 
   acknowledgeEvent(id, via);
   setUrlReference(event.url_id, event.capture_id);
@@ -348,7 +346,7 @@ apiV1Router.post("/events/:id/acknowledge", (req: Request, res: Response) => {
 });
 
 apiV1Router.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  if ((err as any).type === "entity.parse.failed") {
+  if ((err as Error & { type?: string }).type === "entity.parse.failed") {
     jsonError(res, 400, "Malformed JSON body");
     return;
   }

@@ -44,12 +44,19 @@ export function getDataDir(): string {
 
 export function updateConfig(updates: Partial<AppConfig>): AppConfig {
   const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-  const parsed = yaml.load(raw) as Record<string, any>;
+  const parsed = yaml.load(raw) as Record<string, unknown> & {
+    schedule?: string;
+    delay_between_checks_ms?: number;
+    ack_timeout_minutes?: number;
+    thresholds?: { pixel_diff_percent?: number; text_change_lines?: number };
+  };
 
   // Merge updates into the parsed config
   if (updates.schedule !== undefined) parsed.schedule = updates.schedule;
-  if (updates.delay_between_checks_ms !== undefined) parsed.delay_between_checks_ms = updates.delay_between_checks_ms;
-  if (updates.ack_timeout_minutes !== undefined) parsed.ack_timeout_minutes = updates.ack_timeout_minutes;
+  if (updates.delay_between_checks_ms !== undefined)
+    parsed.delay_between_checks_ms = updates.delay_between_checks_ms;
+  if (updates.ack_timeout_minutes !== undefined)
+    parsed.ack_timeout_minutes = updates.ack_timeout_minutes;
   if (updates.thresholds) {
     parsed.thresholds = parsed.thresholds || {};
     if (updates.thresholds.pixel_diff_percent !== undefined)
