@@ -1,0 +1,85 @@
+<% var title = 'Settings'; %>
+<%- include('header') %>
+
+<h1 class="page-title">Settings</h1>
+<p class="page-subtitle">Configure monitoring schedule and thresholds</p>
+
+<% if (typeof flash !== 'undefined' && flash) { %>
+  <div class="flash flash-success"><%= flash %></div>
+<% } %>
+<% if (typeof error !== 'undefined' && error) { %>
+  <div class="flash flash-error"><%= error %></div>
+<% } %>
+
+<form method="POST" action="/settings/update">
+  <div class="card">
+    <div class="card-header">
+      <h2>Schedule</h2>
+    </div>
+
+    <div class="settings-grid">
+      <div class="field">
+        <label>Check Interval</label>
+        <select name="schedule_preset" id="schedulePreset" onchange="handlePresetChange()">
+          <option value="*/5 * * * *" <%= config.schedule === '*/5 * * * *' ? 'selected' : '' %>>Every 5 minutes</option>
+          <option value="*/10 * * * *" <%= config.schedule === '*/10 * * * *' ? 'selected' : '' %>>Every 10 minutes</option>
+          <option value="*/15 * * * *" <%= config.schedule === '*/15 * * * *' ? 'selected' : '' %>>Every 15 minutes</option>
+          <option value="*/30 * * * *" <%= config.schedule === '*/30 * * * *' ? 'selected' : '' %>>Every 30 minutes</option>
+          <option value="0 * * * *" <%= config.schedule === '0 * * * *' ? 'selected' : '' %>>Every hour</option>
+          <option value="0 */2 * * *" <%= config.schedule === '0 */2 * * *' ? 'selected' : '' %>>Every 2 hours</option>
+          <option value="0 */6 * * *" <%= config.schedule === '0 */6 * * *' ? 'selected' : '' %>>Every 6 hours</option>
+          <option value="0 0 * * *" <%= config.schedule === '0 0 * * *' ? 'selected' : '' %>>Once daily (midnight)</option>
+          <option value="custom" <%= !['*/5 * * * *','*/10 * * * *','*/15 * * * *','*/30 * * * *','0 * * * *','0 */2 * * *','0 */6 * * *','0 0 * * *'].includes(config.schedule) ? 'selected' : '' %>>Custom cron...</option>
+        </select>
+      </div>
+      <div class="field" id="customCronField" style="display:<%= !['*/5 * * * *','*/10 * * * *','*/15 * * * *','*/30 * * * *','0 * * * *','0 */2 * * *','0 */6 * * *','0 0 * * *'].includes(config.schedule) ? 'flex' : 'none' %>;">
+        <label>Custom Cron Expression</label>
+        <input type="text" name="schedule_custom" value="<%= config.schedule %>" placeholder="*/15 * * * *">
+      </div>
+    </div>
+
+    <div class="settings-grid mt-4">
+      <div class="field">
+        <label>Delay Between Checks (ms)</label>
+        <input type="number" name="delay_between_checks_ms" value="<%= config.delay_between_checks_ms %>" min="0" step="500">
+      </div>
+      <div class="field">
+        <label>Ack Timeout (minutes)</label>
+        <input type="number" name="ack_timeout_minutes" value="<%= config.ack_timeout_minutes %>" min="1">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Detection Thresholds</h2>
+    </div>
+    <p class="text-sm text-muted mb-4">Changes below these thresholds skip the AI check and are logged as "no change."</p>
+
+    <div class="settings-grid">
+      <div class="field">
+        <label>Pixel Diff Threshold (%)</label>
+        <input type="number" name="pixel_diff_percent" value="<%= config.thresholds.pixel_diff_percent %>" min="0" max="100" step="0.1">
+      </div>
+      <div class="field">
+        <label>Text Change Threshold (lines)</label>
+        <input type="number" name="text_change_lines" value="<%= config.thresholds.text_change_lines %>" min="0">
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:12px; justify-content:flex-end;">
+    <a href="/" class="btn btn-outline">Cancel</a>
+    <button type="submit" class="btn btn-primary">Save Settings</button>
+  </div>
+</form>
+
+<script>
+function handlePresetChange() {
+  const preset = document.getElementById('schedulePreset');
+  const custom = document.getElementById('customCronField');
+  custom.style.display = preset.value === 'custom' ? 'flex' : 'none';
+}
+</script>
+
+<%- include('footer') %>

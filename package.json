@@ -1,0 +1,44 @@
+{
+  "name": "pageguard",
+  "version": "1.0.0",
+  "description": "Self-hosted website monitoring — detects visual and structural changes, alerts via Slack/email",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "baseline": "tsx src/index.ts --baseline",
+    "check": "tsx src/index.ts --check"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@slack/bolt": "^4.1.0",
+    "@slack/web-api": "^7.8.0",
+    "better-sqlite3": "^11.7.0",
+    "diff": "^7.0.0",
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "express-basic-auth": "^1.2.1",
+    "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.0",
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.49.0",
+    "pngjs": "^7.0.0",
+    "resend": "^4.0.0",
+    "tsx": "^4.19.0",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/diff": "^6.0.0",
+    "@types/ejs": "^3.1.5",
+    "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.17",
+    "@types/pngjs": "^6.0.5",
+    "typescript": "^5.7.0"
+  }
+}

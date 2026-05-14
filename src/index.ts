@@ -1,0 +1,85 @@
+import { loadConfig } from "./config";
+import { ensureDataDir } from "./storage/files";
+import { getDb } from "./storage/db";
+import { createDashboardApp, startDashboard } from "./dashboard/server";
+import { initSlackApp, startSlackApp } from "./notify/slack";
+import { startScheduler } from "./scheduler";
+import { runBaseline, runAllChecks } from "./scheduler";
+import { startAckChecker } from "./acknowledge";
+import { closeBrowser } from "./capture";
+import { logger } from "./logger";
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  // Load config and initialize storage
+  const config = loadConfig();
+  ensureDataDir();
+  getDb();
+
+  logger.info("PageGuard starting...");
+
+  // Handle CLI modes
+  if (args.includes("--baseline")) {
+    logger.info("Running baseline capture for all configured URLs");
+    await runBaseline();
+    await closeBrowser();
+    logger.info("Baseline complete. Exiting.");
+    process.exit(0);
+  }
+
+  if (args.includes("--check")) {
+    logger.info("Running one-time check for all URLs");
+    // Sync URLs from config
+    const { upsertUrl } = await import("./storage/db");
+    for (const u of config.urls) {
+      upsertUrl(u.url, u.label);
+    }
+    await runAllChecks();
+    await closeBrowser();
+    logger.info("Check complete. Exiting.");
+    process.exit(0);
+  }
+
+  // --- Server mode: start everything ---
+
+  // Initialize Slack app (registers handlers for interactive messages)
+  const slackApp = initSlackApp();
+
+  // Start web dashboard
+  const dashboardApp = createDashboardApp();
+  startDashboard(dashboardApp);
+
+  // Start Slack in socket mode if configured
+  if (slackApp) {
+    try {
+      await startSlackApp();
+    } catch (err: any) {
+      logger.error(`Slack app failed to start: ${err.message}`);
+    }
+  }
+
+  // Start cron scheduler
+  startScheduler();
+
+  // Start acknowledgment timeout checker
+  startAckChecker();
+
+  logger.info("PageGuard is running.");
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    logger.info("Shutting down...");
+    await closeBrowser();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+main().catch((err) => {
+  logger.error(`Fatal error: ${err.message}`);
+  console.error(err);
+  process.exit(1);
+});

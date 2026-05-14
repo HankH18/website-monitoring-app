@@ -1,0 +1,178 @@
+<% var title = url.label; %>
+<%- include('header') %>
+
+<div style="margin-bottom:20px;">
+  <a href="/" class="text-sm text-muted" style="text-decoration:none;">&larr; Back to Dashboard</a>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2 style="font-size:18px;"><%= url.label %></h2>
+      <a href="<%= url.url %>" target="_blank" class="text-sm" style="font-weight:400;"><%= url.url %></a>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <% if (url.status === 'ok') { %>
+        <span class="badge badge-ok">Healthy</span>
+      <% } else if (url.status === 'change_detected') { %>
+        <span class="badge badge-change">Change Detected</span>
+      <% } else if (url.status === 'error') { %>
+        <span class="badge badge-error">Error</span>
+      <% } else { %>
+        <span class="badge badge-pending">Pending</span>
+      <% } %>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:24px; font-size:12px; color:var(--text-dim); margin-bottom:16px;">
+    <span>Last checked: <strong style="color:var(--text-muted);"><%= url.last_checked || 'Never' %></strong></span>
+    <% if (url.last_change) { %>
+      <span>Last change: <strong style="color:var(--text-muted);"><%= url.last_change %></strong></span>
+    <% } %>
+  </div>
+
+  <div class="actions">
+    <form method="POST" action="/url/<%= url.id %>/check" class="inline-form">
+      <button type="submit" class="btn btn-primary">Run Check Now</button>
+    </form>
+    <form method="POST" action="/url/<%= url.id %>/baseline" class="inline-form">
+      <button type="submit" class="btn btn-outline">Capture New Baseline</button>
+    </form>
+  </div>
+</div>
+
+<% if (reference && latest) { %>
+<div class="card">
+  <div class="card-header">
+    <h2>Visual Comparison</h2>
+    <% if (latest.id !== reference.id) { %>
+      <form method="POST" action="/url/<%= url.id %>/set-reference/<%= latest.id %>" class="inline-form">
+        <button type="submit" class="btn btn-success btn-sm">Accept Latest as Baseline</button>
+      </form>
+    <% } %>
+  </div>
+  <div class="screenshots">
+    <div class="screenshot-frame">
+      <div class="frame-label">Reference (Baseline)</div>
+      <img src="/screenshot/<%= reference.screenshot_path %>" alt="Reference screenshot">
+      <div class="frame-meta">Captured: <%= reference.timestamp %></div>
+    </div>
+    <div class="screenshot-frame">
+      <div class="frame-label">Latest Capture</div>
+      <img src="/screenshot/<%= latest.screenshot_path %>" alt="Latest screenshot">
+      <div class="frame-meta">Captured: <%= latest.timestamp %></div>
+    </div>
+  </div>
+</div>
+<% } else { %>
+<div class="card">
+  <p class="empty">No captures yet. Click "Run Check Now" or "Capture New Baseline" to start monitoring.</p>
+</div>
+<% } %>
+
+<% if (events.length > 0) { %>
+<div class="card">
+  <div class="card-header">
+    <h2>Change History</h2>
+    <span class="text-sm text-dim"><%= events.length %> event<%= events.length !== 1 ? 's' : '' %></span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Pixel Diff</th>
+        <th>Text Changes</th>
+        <th>AI Verdict</th>
+        <th>Summary</th>
+        <th>Acknowledged</th>
+        <th style="text-align:right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const e of events) { %>
+      <tr>
+        <td class="text-sm text-muted"><%= e.timestamp %></td>
+        <td><%= e.pixel_diff_percent.toFixed(1) %>%</td>
+        <td><%= e.text_diff_count %> lines</td>
+        <td>
+          <% if (e.ai_significant === 1) { %>
+            <span class="badge badge-change">Significant</span>
+          <% } else if (e.ai_significant === 0) { %>
+            <span class="badge badge-ok">Trivial</span>
+          <% } else { %>
+            <span class="badge badge-pending">N/A</span>
+          <% } %>
+        </td>
+        <td class="text-sm" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<%= e.ai_summary || '' %>">
+          <%= e.ai_summary || '—' %>
+        </td>
+        <td>
+          <% if (e.acknowledged) { %>
+            <span class="badge badge-ok" title="Via <%= e.acknowledged_via %> at <%= e.acknowledged_at %>">Yes</span>
+          <% } else if (e.ai_significant === 1) { %>
+            <span class="badge badge-change">Pending</span>
+          <% } else { %>
+            <span class="text-dim">—</span>
+          <% } %>
+        </td>
+        <td style="text-align:right;">
+          <% if (e.ai_significant === 1 && !e.acknowledged) { %>
+            <form method="POST" action="/event/<%= e.id %>/acknowledge" class="inline-form">
+              <button type="submit" class="btn btn-success btn-sm">Acknowledge</button>
+            </form>
+          <% } %>
+          <form method="POST" action="/url/<%= url.id %>/set-reference/<%= e.capture_id %>" class="inline-form">
+            <button type="submit" class="btn btn-ghost btn-sm">Set as Ref</button>
+          </form>
+        </td>
+      </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<% if (captures.length > 0) { %>
+<div class="card">
+  <div class="card-header">
+    <h2>All Captures</h2>
+    <span class="text-sm text-dim"><%= captures.length %> capture<%= captures.length !== 1 ? 's' : '' %></span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Timestamp</th>
+        <th>Status</th>
+        <th>Screenshot</th>
+        <th style="text-align:right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% for (const c of captures) { %>
+      <tr>
+        <td class="text-muted"><%= c.id %></td>
+        <td class="text-sm"><%= c.timestamp %></td>
+        <td>
+          <% if (c.is_reference) { %>
+            <span class="badge badge-ok">Current Reference</span>
+          <% } %>
+        </td>
+        <td>
+          <a href="/screenshot/<%= c.screenshot_path %>" target="_blank" class="text-sm">View Screenshot</a>
+        </td>
+        <td style="text-align:right;">
+          <% if (!c.is_reference) { %>
+            <form method="POST" action="/url/<%= url.id %>/set-reference/<%= c.id %>" class="inline-form">
+              <button type="submit" class="btn btn-outline btn-sm">Set as Reference</button>
+            </form>
+          <% } %>
+        </td>
+      </tr>
+      <% } %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<%- include('footer') %>

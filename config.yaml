@@ -1,0 +1,64 @@
+# PageGuard Configuration
+# ========================
+
+# Monitoring schedule (cron expression) — default: every 15 minutes
+schedule: "*/15 * * * *"
+
+# Delay between each URL check in milliseconds (avoids rate limits)
+delay_between_checks_ms: 3000
+
+# First-pass thresholds — skip AI check when changes are below these
+thresholds:
+  pixel_diff_percent: 2.0    # % of pixels that differ
+  text_change_lines: 0       # number of meaningful text lines changed
+
+# Acknowledgment timeout — reminder sent if no ack within this window (minutes)
+ack_timeout_minutes: 60
+
+# Ack reminder check interval (minutes)
+ack_check_interval_minutes: 5
+
+# Notification defaults (can be overridden per-URL)
+notifications:
+  slack: true
+  email: false
+
+# Slack configuration
+slack:
+  channel: "#website-monitoring"
+
+# Email configuration
+email:
+  provider: "smtp"          # "smtp" or "resend"
+  to: ""                    # recipient address
+  from: "pageguard@example.com"
+  smtp:
+    host: "smtp.example.com"
+    port: 587
+    secure: false
+
+# Dashboard
+dashboard:
+  port: 3000
+
+# Playwright settings
+playwright:
+  viewport_width: 1280
+  viewport_height: 720
+  wait_after_load_ms: 2000
+  full_page_screenshot: true
+
+# URLs to monitor
+urls:
+  - url: "https://decidethrive.com"
+    label: "Homepage"
+
+  - url: "https://decidethrive.com/collections/all"
+    label: "All Products Collection"
+
+  - url: "https://decidethrive.com/products/PLACEHOLDER"
+    label: "Product Page - TBD"
+    # Per-URL notification overrides (optional):
+    # notifications:
+    #   slack: true
+    #   email: true

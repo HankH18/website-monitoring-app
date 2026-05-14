@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+.env
+*.log
+.claude/SKIP_TESTS
+.claude/local/
+.claude/settings.local.json
+*.bak.[0-9]*
