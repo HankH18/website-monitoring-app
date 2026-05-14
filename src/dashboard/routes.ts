@@ -13,6 +13,8 @@ import {
   getCaptureById,
   getChangeEventById,
   acknowledgeEvent,
+  muteUrl,
+  unmuteUrl,
 } from "../storage/db";
 import { checkUrl } from "../monitor";
 import { reschedule } from "../scheduler";
@@ -72,8 +74,7 @@ async function validatePublicUrl(raw: string): Promise<string | null> {
     const addrs = await dns.lookup(host, { all: true });
     if (addrs.length === 0) return "Could not resolve host";
     for (const a of addrs) {
-      if (isPrivateIp(a.address))
-        return "URL resolves to a private or reserved address";
+      if (isPrivateIp(a.address)) return "URL resolves to a private or reserved address";
     }
   } catch {
     return "Could not resolve host";
@@ -82,20 +83,17 @@ async function validatePublicUrl(raw: string): Promise<string | null> {
 }
 
 export function setupRoutes(app: Application): void {
-  const csrfSecret =
-    process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
+  const csrfSecret = process.env.CSRF_SECRET || crypto.randomBytes(32).toString("hex");
 
   app.use(cookieParser(csrfSecret));
 
   const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
     getSecret: () => csrfSecret,
     getSessionIdentifier: (req: Request) => {
-      const user =
-        (req as any).auth?.user || req.headers["authorization"] || "anonymous";
+      const user = (req as any).auth?.user || req.headers["authorization"] || "anonymous";
       return String(user);
     },
-    cookieName:
-      process.env.NODE_ENV === "production" ? "__Host-pg.csrf" : "pg.csrf",
+    cookieName: process.env.NODE_ENV === "production" ? "__Host-pg.csrf" : "pg.csrf",
     cookieOptions: {
       httpOnly: true,
       sameSite: "lax",
@@ -175,6 +173,32 @@ export function setupRoutes(app: Application): void {
     }
   });
 
+  // Mute a URL for N minutes
+  app.post("/url/:id/mute", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string);
+    const minutes = parseInt(req.body?.minutes);
+    const url = getUrlById(id);
+    if (!url) return res.status(404).send("URL not found");
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 60 * 24 * 30) {
+      return res.status(400).send("Invalid minutes");
+    }
+    muteUrl(id, minutes);
+    logger.info(`${url.label}: muted for ${minutes} minutes`);
+    const ref = (req.headers.referer as string) || `/url/${id}`;
+    res.redirect(ref);
+  });
+
+  // Unmute a URL
+  app.post("/url/:id/unmute", (req: Request, res: Response) => {
+    const id = parseInt(req.params.id as string);
+    const url = getUrlById(id);
+    if (!url) return res.status(404).send("URL not found");
+    unmuteUrl(id);
+    logger.info(`${url.label}: unmuted`);
+    const ref = (req.headers.referer as string) || `/url/${id}`;
+    res.redirect(ref);
+  });
+
   // Manual baseline capture
   app.post("/url/:id/baseline", async (req: Request, res: Response) => {
     const id = parseInt(req.params.id as string);
@@ -191,20 +215,17 @@ export function setupRoutes(app: Application): void {
   });
 
   // Update reference to a specific capture
-  app.post(
-    "/url/:id/set-reference/:captureId",
-    (req: Request, res: Response) => {
-      const urlId = parseInt(req.params.id as string);
-      const captureId = parseInt(req.params.captureId as string);
+  app.post("/url/:id/set-reference/:captureId", (req: Request, res: Response) => {
+    const urlId = parseInt(req.params.id as string);
+    const captureId = parseInt(req.params.captureId as string);
 
-      const url = getUrlById(urlId);
-      const capture = getCaptureById(captureId);
-      if (!url || !capture) return res.status(404).send("Not found");
+    const url = getUrlById(urlId);
+    const capture = getCaptureById(captureId);
+    if (!url || !capture) return res.status(404).send("Not found");
 
-      setUrlReference(urlId, captureId);
-      res.redirect(`/url/${urlId}`);
-    },
-  );
+    setUrlReference(urlId, captureId);
+    res.redirect(`/url/${urlId}`);
+  });
 
   // Acknowledge a change event via dashboard
   app.post("/event/:id/acknowledge", (req: Request, res: Response) => {
@@ -236,8 +257,7 @@ export function setupRoutes(app: Application): void {
       } = req.body;
 
       // Determine schedule value
-      const newSchedule =
-        schedule_preset === "custom" ? schedule_custom : schedule_preset;
+      const newSchedule = schedule_preset === "custom" ? schedule_custom : schedule_preset;
 
       // Validate cron expression
       if (!cron.validate(newSchedule)) {

@@ -1,8 +1,95 @@
 <% var title = url.label; %>
 <%- include('header') %>
 
+<%
+  const nowMs = Date.now();
+  let muteMs = 0;
+  if (url.muted_until) {
+    const ts = Date.parse(String(url.muted_until).replace(' ', 'T') + 'Z');
+    if (!isNaN(ts)) muteMs = Math.max(0, ts - nowMs);
+  }
+  const muted = muteMs > 0;
+  let sslDays = null;
+  if (url.ssl_not_after) {
+    const ts = Date.parse(String(url.ssl_not_after).replace(' ', 'T') + (String(url.ssl_not_after).endsWith('Z') ? '' : 'Z'));
+    if (!isNaN(ts)) sslDays = (ts - nowMs) / 86400000;
+  }
+%>
+
 <div style="margin-bottom:20px;">
   <a href="/" class="text-sm text-muted" style="text-decoration:none;">&larr; Back to Dashboard</a>
+</div>
+
+<% if (muted) { %>
+<div class="card" style="border-left:3px solid var(--text-muted);">
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <div>
+      <strong>Muted</strong> — change-detection and uptime alerts paused for <%= Math.ceil(muteMs / 60000) %> more minute<%= Math.ceil(muteMs / 60000) === 1 ? '' : 's' %>
+      <div class="text-sm text-dim">Until <%= url.muted_until %></div>
+    </div>
+    <form method="POST" action="/url/<%= url.id %>/unmute" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="btn btn-outline btn-sm">Unmute</button>
+    </form>
+  </div>
+</div>
+<% } else { %>
+<div class="card">
+  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+    <span class="text-sm text-muted">Mute alerts:</span>
+    <% for (const m of [30, 60, 240, 1440]) { %>
+      <form method="POST" action="/url/<%= url.id %>/mute" class="inline-form" style="margin:0;">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="minutes" value="<%= m %>">
+        <button type="submit" class="btn btn-ghost btn-sm">
+          <%= m === 30 ? '30m' : m === 60 ? '1h' : m === 240 ? '4h' : '24h' %>
+        </button>
+      </form>
+    <% } %>
+  </div>
+</div>
+<% } %>
+
+<div class="card">
+  <div class="card-header"><h2>Uptime</h2></div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:16px;">
+    <div>
+      <div class="text-sm text-dim">Status</div>
+      <div style="font-size:18px; font-weight:500;">
+        <% if (url.last_status_code != null) { %>
+          <% const ok = url.last_status_code >= 200 && url.last_status_code < 400; %>
+          <span style="color: var(--<%= ok ? 'green' : url.last_status_code < 500 ? 'yellow' : 'red' %>);"><%= url.last_status_code %></span>
+        <% } else if (url.last_status_check) { %>
+          <span style="color:var(--red);">DOWN</span>
+        <% } else { %>
+          <span class="text-dim">—</span>
+        <% } %>
+      </div>
+    </div>
+    <div>
+      <div class="text-sm text-dim">Response time</div>
+      <div style="font-size:18px; font-weight:500;">
+        <%= url.last_response_time_ms != null ? url.last_response_time_ms + ' ms' : '—' %>
+      </div>
+    </div>
+    <div>
+      <div class="text-sm text-dim">SSL</div>
+      <div style="font-size:18px; font-weight:500;">
+        <% if (sslDays == null) { %>—
+        <% } else if (sslDays < 0) { %><span style="color:var(--red);">EXPIRED</span>
+        <% } else { %><span style="color: var(--<%= sslDays < 14 ? 'yellow' : 'text-muted' %>);"><%= Math.floor(sslDays) %> days</span>
+        <% } %>
+      </div>
+    </div>
+    <div>
+      <div class="text-sm text-dim">Consecutive failures</div>
+      <div style="font-size:18px; font-weight:500;"><%= url.consecutive_failures || 0 %></div>
+    </div>
+    <div>
+      <div class="text-sm text-dim">Last uptime check</div>
+      <div class="text-sm" style="font-weight:500;"><%= url.last_status_check || 'Never' %></div>
+    </div>
+  </div>
 </div>
 
 <div class="card">

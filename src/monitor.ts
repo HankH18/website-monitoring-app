@@ -25,6 +25,14 @@ export async function checkUrl(
 ): Promise<void> {
   const config = loadConfig();
 
+  if (!isBaseline && url.muted_until) {
+    const until = new Date(url.muted_until.replace(" ", "T") + "Z");
+    if (!isNaN(until.getTime()) && until.getTime() > Date.now()) {
+      logger.info(`${url.label}: muted until ${url.muted_until}, skipping`);
+      return;
+    }
+  }
+
   // 1. Capture the page
   const capture = await capturePage(url.url);
 

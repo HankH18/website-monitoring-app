@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Self-hosted website monitoring — detects visual and structural changes, alerts via Slack/email",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -10,7 +13,11 @@
     "baseline": "tsx src/index.ts --baseline",
     "check": "tsx src/index.ts --check",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -36,6 +43,7 @@
     "winston": "^3.17.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/cookie-parser": "^1.4.10",
     "@types/diff": "^6.0.0",
@@ -46,7 +54,11 @@
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.17",
     "@types/pngjs": "^6.0.5",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.3",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.59.3",
     "vitest": "^4.1.6"
   }
 }

@@ -2,10 +2,13 @@ import cron from "node-cron";
 import { loadConfig } from "./config";
 import { checkUrl } from "./monitor";
 import { getAllUrls, upsertUrl } from "./storage/db";
+import { runAllUptimeChecks } from "./uptime";
 import { logger } from "./logger";
 
 let _task: cron.ScheduledTask | null = null;
+let _uptimeTask: cron.ScheduledTask | null = null;
 let _running = false;
+let _uptimeRunning = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -27,9 +30,7 @@ export async function runAllChecks(): Promise<void> {
     try {
       await checkUrl(url);
     } catch (err: any) {
-      logger.error(
-        `Check failed for ${url.label} (${url.url}): ${err.message}`,
-      );
+      logger.error(`Check failed for ${url.label} (${url.url}): ${err.message}`);
     }
 
     // Delay between checks (skip after last URL)
@@ -55,6 +56,28 @@ async function tickRunAllChecks(): Promise<void> {
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
     logger.info(`cycle duration: ${seconds}s`);
   }
+}
+
+async function tickRunAllUptime(): Promise<void> {
+  if (_uptimeRunning) {
+    logger.warn("previous uptime cycle still running; skipping tick");
+    return;
+  }
+  _uptimeRunning = true;
+  try {
+    await runAllUptimeChecks();
+  } catch (err: any) {
+    logger.error(`uptime cycle error: ${err.message}`);
+  } finally {
+    _uptimeRunning = false;
+  }
+}
+
+function uptimeCronExpr(): string {
+  const secs = Math.max(1, parseInt(process.env.UPTIME_INTERVAL_SECONDS || "60", 10) || 60);
+  if (secs < 60) return `*/${secs} * * * * *`;
+  const minutes = Math.floor(secs / 60);
+  return minutes <= 1 ? "* * * * *" : `*/${minutes} * * * *`;
 }
 
 export async function runBaseline(): Promise<void> {
@@ -98,7 +121,12 @@ export function startScheduler(): void {
     await tickRunAllChecks();
   });
 
-  logger.info(`Scheduler started with cron: ${config.schedule}`);
+  const uptimeExpr = uptimeCronExpr();
+  _uptimeTask = cron.schedule(uptimeExpr, async () => {
+    await tickRunAllUptime();
+  });
+
+  logger.info(`Scheduler started with cron: ${config.schedule} (uptime: ${uptimeExpr})`);
 }
 
 export function stopScheduler(): void {
@@ -107,10 +135,17 @@ export function stopScheduler(): void {
     _task = null;
     logger.info("Scheduler stopped");
   }
+  if (_uptimeTask) {
+    _uptimeTask.stop();
+    _uptimeTask = null;
+  }
 }
 
 export function reschedule(newCron: string): void {
-  stopScheduler();
+  if (_task) {
+    _task.stop();
+    _task = null;
+  }
 
   _task = cron.schedule(newCron, async () => {
     logger.info("Scheduled check triggered");

@@ -1,0 +1,424 @@
+openapi: 3.1.0
+info:
+  title: PageGuard REST API
+  version: "1.0.0"
+  description: |
+    Versioned REST API for PageGuard, parallel to the browser dashboard.
+    Bearer-token authenticated via the `API_TOKEN` server env var.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/health:
+    get:
+      summary: API liveness probe (always 200)
+      responses:
+        "200":
+          description: Health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/TokenNotConfigured"
+  /api/v1/urls:
+    get:
+      summary: List monitored URLs
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Paginated URL list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [urls, total]
+                additionalProperties: false
+                properties:
+                  urls:
+                    type: array
+                    items: { $ref: "#/components/schemas/MonitoredUrl" }
+                  total: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+    post:
+      summary: Add a monitored URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, label]
+              additionalProperties: false
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: http(s) URL, SSRF-validated against private/reserved addresses
+                label:
+                  type: string
+                  minLength: 1
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MonitoredUrl" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+  /api/v1/urls/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Get a URL plus its latest capture summary
+      responses:
+        "200":
+          description: URL detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MonitoredUrl"
+                  - type: object
+                    properties:
+                      latest_capture:
+                        oneOf:
+                          - type: "null"
+                          - $ref: "#/components/schemas/CaptureSummary"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+    delete:
+      summary: Delete a URL (and its captures)
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [deleted, id]
+                properties:
+                  deleted: { type: boolean, const: true }
+                  id: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+  /api/v1/urls/{id}/check:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Trigger an immediate check for a URL
+      responses:
+        "202":
+          description: Check completed; change_event_id is non-null if a change was recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url_id, change_event_id]
+                additionalProperties: false
+                properties:
+                  url_id: { type: integer }
+                  change_event_id:
+                    oneOf:
+                      - type: integer
+                      - type: "null"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+  /api/v1/events:
+    get:
+      summary: List change events
+      parameters:
+        - in: query
+          name: url_id
+          schema: { type: integer }
+        - in: query
+          name: acknowledged
+          schema: { type: string, enum: ["true", "false"] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: Paginated event list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, total]
+                additionalProperties: false
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/ChangeEvent" }
+                  total: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+  /api/v1/events/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    get:
+      summary: Get a single change event
+      responses:
+        "200":
+          description: Change event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangeEvent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+  /api/v1/events/{id}/acknowledge:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    post:
+      summary: Acknowledge a change event (also updates reference baseline)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                via:
+                  type: string
+                  default: api
+                  description: Acknowledgement source label
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged, id, via]
+                additionalProperties: false
+                properties:
+                  acknowledged: { type: boolean, const: true }
+                  id: { type: integer }
+                  via: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/TokenNotConfigured" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  responses:
+    BadRequest:
+      description: Bad input
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TokenNotConfigured:
+      description: API_TOKEN env var is not configured on the server
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        field: { type: string }
+    Health:
+      type: object
+      required: [status, uptime_seconds, version, checks]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        uptime_seconds: { type: number }
+        version: { type: string }
+        checks:
+          type: object
+          required: [db]
+          additionalProperties: false
+          properties:
+            db: { type: string, enum: [ok, fail] }
+    MonitoredUrl:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - url
+        - label
+        - url_hash
+        - status
+        - last_checked
+        - last_change
+        - reference_capture_id
+        - created_at
+      properties:
+        id: { type: integer }
+        url: { type: string }
+        label: { type: string }
+        url_hash: { type: string }
+        status:
+          type: string
+          enum: [ok, change_detected, error, pending]
+        last_checked:
+          oneOf:
+            - type: "null"
+            - type: string
+        last_change:
+          oneOf:
+            - type: "null"
+            - type: string
+        reference_capture_id:
+          oneOf:
+            - type: "null"
+            - type: integer
+        created_at: { type: string }
+    CaptureSummary:
+      type: object
+      additionalProperties: false
+      required: [id, timestamp, is_reference, screenshot_path]
+      properties:
+        id: { type: integer }
+        timestamp: { type: string }
+        is_reference: { type: boolean }
+        screenshot_path: { type: string }
+    AiAssessment:
+      type: object
+      additionalProperties: false
+      required:
+        - significant
+        - confidence
+        - summary
+        - details
+        - category
+        - input_tokens
+        - output_tokens
+        - cost_usd
+      properties:
+        significant:
+          oneOf:
+            - type: boolean
+            - type: "null"
+        confidence:
+          oneOf:
+            - type: number
+            - type: "null"
+        summary:
+          oneOf:
+            - type: string
+            - type: "null"
+        details:
+          oneOf:
+            - type: array
+              items: { type: string }
+            - type: "null"
+        category:
+          oneOf:
+            - type: string
+              enum:
+                - layout_break
+                - content_change
+                - error_state
+                - missing_element
+                - other
+            - type: "null"
+        input_tokens:
+          oneOf:
+            - type: integer
+            - type: "null"
+        output_tokens:
+          oneOf:
+            - type: integer
+            - type: "null"
+        cost_usd:
+          oneOf:
+            - type: number
+            - type: "null"
+    ChangeEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - url_id
+        - capture_id
+        - reference_capture_id
+        - pixel_diff_percent
+        - text_diff_count
+        - ai_assessment
+        - notified
+        - acknowledged
+        - acknowledged_at
+        - acknowledged_via
+        - timestamp
+      properties:
+        id: { type: integer }
+        url_id: { type: integer }
+        capture_id: { type: integer }
+        reference_capture_id: { type: integer }
+        pixel_diff_percent: { type: number }
+        text_diff_count: { type: integer }
+        ai_assessment: { $ref: "#/components/schemas/AiAssessment" }
+        notified: { type: boolean }
+        acknowledged: { type: boolean }
+        acknowledged_at:
+          oneOf:
+            - type: "null"
+            - type: string
+        acknowledged_via:
+          oneOf:
+            - type: "null"
+            - type: string
+        timestamp: { type: string }

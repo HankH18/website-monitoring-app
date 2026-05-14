@@ -6,6 +6,35 @@
   const changeCount = urls.filter(u => u.status === 'change_detected').length;
   const errorCount = urls.filter(u => u.status === 'error').length;
   const pendingCount = urls.filter(u => u.status === 'pending').length;
+  const nowMs = Date.now();
+  function muteRemaining(u) {
+    if (!u.muted_until) return 0;
+    const ts = Date.parse(String(u.muted_until).replace(' ', 'T') + 'Z');
+    if (isNaN(ts)) return 0;
+    return Math.max(0, ts - nowMs);
+  }
+  function statusColor(code) {
+    if (code == null) return 'red';
+    if (code >= 200 && code < 400) return 'green';
+    if (code >= 400 && code < 500) return 'yellow';
+    return 'red';
+  }
+  function sslDaysLeft(s) {
+    if (!s) return null;
+    const ts = Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
+    if (isNaN(ts)) return null;
+    return (ts - nowMs) / 86400000;
+  }
+  function relTime(s) {
+    if (!s) return 'Never';
+    const ts = Date.parse(String(s).replace(' ', 'T') + (String(s).endsWith('Z') ? '' : 'Z'));
+    if (isNaN(ts)) return s;
+    const diff = Math.max(0, nowMs - ts) / 1000;
+    if (diff < 60) return Math.floor(diff) + 's ago';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
 %>
 
 <h1 class="page-title">Dashboard</h1>
@@ -42,42 +71,90 @@
   <% if (urls.length === 0) { %>
     <p class="empty">No URLs configured yet. Add one below or run <code>npm run baseline</code> to get started.</p>
   <% } else { %>
-    <table>
+    <table style="font-size:13px;">
       <thead>
         <tr>
           <th>Label</th>
-          <th>URL</th>
           <th>Status</th>
-          <th>Last Checked</th>
+          <th>Uptime</th>
+          <th>SSL</th>
+          <th>Last Check</th>
           <th style="text-align:right;">Actions</th>
         </tr>
       </thead>
       <tbody>
         <% for (const u of urls) { %>
+        <%
+          const muteMs = muteRemaining(u);
+          const muted = muteMs > 0;
+          const sCode = u.last_status_code;
+          const sColor = statusColor(sCode);
+          const ssl = sslDaysLeft(u.ssl_not_after);
+        %>
         <tr>
           <td style="font-weight:500;">
             <a href="/url/<%= u.id %>"><%= u.label %></a>
-          </td>
-          <td class="text-sm text-muted" style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-            <%= u.url %>
+            <div class="text-sm text-muted" style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400;"><%= u.url %></div>
           </td>
           <td>
-            <% if (u.status === 'ok') { %>
+            <% if (muted) { %>
+              <span class="badge" style="background:var(--surface2); color:var(--text-muted);">Muted (<%= Math.ceil(muteMs / 60000) %>m)</span>
+            <% } else if (u.status === 'ok') { %>
               <span class="badge badge-ok">Healthy</span>
             <% } else if (u.status === 'change_detected') { %>
-              <span class="badge badge-change">Change Detected</span>
+              <span class="badge badge-change">Change</span>
             <% } else if (u.status === 'error') { %>
               <span class="badge badge-error">Error</span>
             <% } else { %>
               <span class="badge badge-pending">Pending</span>
             <% } %>
           </td>
-          <td class="text-sm text-muted"><%= u.last_checked || 'Never' %></td>
+          <td>
+            <% if (sCode != null) { %>
+              <span class="badge badge-<%= sColor === 'green' ? 'ok' : sColor === 'yellow' ? 'change' : 'error' %>">
+                <%= sCode %><% if (u.last_response_time_ms != null) { %> (<%= u.last_response_time_ms %>ms)<% } %>
+              </span>
+            <% } else if (u.last_status_check) { %>
+              <span class="badge badge-error">DOWN</span>
+            <% } else { %>
+              <span class="text-dim">—</span>
+            <% } %>
+          </td>
+          <td>
+            <% if (ssl == null) { %>
+              <span class="text-dim">—</span>
+            <% } else if (ssl < 0) { %>
+              <span class="badge badge-error">EXPIRED</span>
+            <% } else if (ssl < 14) { %>
+              <span class="badge badge-change"><%= Math.floor(ssl) %>d</span>
+            <% } else { %>
+              <span class="text-sm text-muted"><%= Math.floor(ssl) %>d</span>
+            <% } %>
+          </td>
+          <td class="text-sm text-muted"><%= relTime(u.last_status_check || u.last_checked) %></td>
           <td style="text-align:right;">
             <form method="POST" action="/url/<%= u.id %>/check" class="inline-form">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-              <button type="submit" class="btn btn-outline btn-sm">Check Now</button>
+              <button type="submit" class="btn btn-outline btn-sm">Check</button>
             </form>
+            <% if (muted) { %>
+              <form method="POST" action="/url/<%= u.id %>/unmute" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="btn btn-ghost btn-sm">Unmute</button>
+              </form>
+            <% } else { %>
+              <span class="inline-form" style="display:inline-flex; gap:2px;">
+                <% for (const m of [30, 60, 240, 1440]) { %>
+                  <form method="POST" action="/url/<%= u.id %>/mute" class="inline-form" style="margin:0;">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="minutes" value="<%= m %>">
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Mute for <%= m %> minutes">
+                      <%= m === 30 ? '30m' : m === 60 ? '1h' : m === 240 ? '4h' : '24h' %>
+                    </button>
+                  </form>
+                <% } %>
+              </span>
+            <% } %>
             <form method="POST" action="/url/<%= u.id %>/delete" class="inline-form" onsubmit="return confirm('Remove <%= u.label %> from monitoring?');">
               <input type="hidden" name="_csrf" value="<%= csrfToken %>">
               <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red);">Remove</button>
