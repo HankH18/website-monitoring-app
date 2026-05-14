@@ -1,17 +1,13 @@
 import { getDb } from "./storage/db";
 import { logger } from "./logger";
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../package.json");
+import pkg from "../package.json";
 
 /**
  * Escape a Prometheus label value per exposition format:
  * backslash, double-quote, and newline must be escaped.
  */
 function escapeLabel(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n");
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
 }
 
 /**
@@ -48,9 +44,7 @@ export async function renderMetrics(): Promise<string> {
   lines.push(`pageguard_uptime_seconds ${process.uptime()}`);
 
   // --- pageguard_urls_total ---
-  const urlCountRow = db
-    .prepare("SELECT COUNT(*) AS c FROM monitored_urls")
-    .get() as { c: number };
+  const urlCountRow = db.prepare("SELECT COUNT(*) AS c FROM monitored_urls").get() as { c: number };
   lines.push("# HELP pageguard_urls_total Number of URLs being monitored.");
   lines.push("# TYPE pageguard_urls_total gauge");
   lines.push(`pageguard_urls_total ${urlCountRow.c}`);
@@ -59,9 +53,7 @@ export async function renderMetrics(): Promise<string> {
   const captureRows = db
     .prepare("SELECT url_id, COUNT(*) AS c FROM captures GROUP BY url_id")
     .all() as Array<{ url_id: number; c: number }>;
-  lines.push(
-    "# HELP pageguard_captures_total Total captures taken, per monitored URL.",
-  );
+  lines.push("# HELP pageguard_captures_total Total captures taken, per monitored URL.");
   lines.push("# TYPE pageguard_captures_total counter");
   for (const row of captureRows) {
     lines.push(`pageguard_captures_total{url_id="${row.url_id}"} ${row.c}`);
@@ -75,9 +67,7 @@ export async function renderMetrics(): Promise<string> {
        GROUP BY url_id, acknowledged`,
     )
     .all() as Array<{ url_id: number; acknowledged: number; c: number }>;
-  lines.push(
-    "# HELP pageguard_change_events_total Change events recorded, per URL and ack state.",
-  );
+  lines.push("# HELP pageguard_change_events_total Change events recorded, per URL and ack state.");
   lines.push("# TYPE pageguard_change_events_total counter");
   for (const row of eventRows) {
     const ack = row.acknowledged ? "true" : "false";
@@ -96,25 +86,19 @@ export async function renderMetrics(): Promise<string> {
 
   const inputTokens = hasInputTokens
     ? (
-        db
-          .prepare(
-            "SELECT COALESCE(SUM(input_tokens), 0) AS s FROM change_events",
-          )
-          .get() as { s: number }
+        db.prepare("SELECT COALESCE(SUM(input_tokens), 0) AS s FROM change_events").get() as {
+          s: number;
+        }
       ).s
     : 0;
   const outputTokens = hasOutputTokens
     ? (
-        db
-          .prepare(
-            "SELECT COALESCE(SUM(output_tokens), 0) AS s FROM change_events",
-          )
-          .get() as { s: number }
+        db.prepare("SELECT COALESCE(SUM(output_tokens), 0) AS s FROM change_events").get() as {
+          s: number;
+        }
       ).s
     : 0;
-  lines.push(
-    "# HELP pageguard_ai_tokens_total Total AI tokens consumed by change-event analysis.",
-  );
+  lines.push("# HELP pageguard_ai_tokens_total Total AI tokens consumed by change-event analysis.");
   lines.push("# TYPE pageguard_ai_tokens_total counter");
   lines.push(`pageguard_ai_tokens_total{kind="input"} ${inputTokens}`);
   lines.push(`pageguard_ai_tokens_total{kind="output"} ${outputTokens}`);
@@ -122,11 +106,9 @@ export async function renderMetrics(): Promise<string> {
   // --- pageguard_ai_cost_usd_total ---
   const aiCost = hasAiCost
     ? (
-        db
-          .prepare(
-            "SELECT COALESCE(SUM(ai_cost_usd), 0) AS s FROM change_events",
-          )
-          .get() as { s: number }
+        db.prepare("SELECT COALESCE(SUM(ai_cost_usd), 0) AS s FROM change_events").get() as {
+          s: number;
+        }
       ).s
     : 0;
   lines.push("# HELP pageguard_ai_cost_usd_total Cumulative AI spend in USD.");

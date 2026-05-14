@@ -23,8 +23,11 @@ if (process.env.NODE_ENV === "production" && process.env.SENTRY_DSN) {
     try {
       Sentry.captureException(err);
       await Sentry.flush(2000);
-    } catch {}
-    logger.error(`Fatal: ${(err as any)?.message ?? err}`);
+    } catch {
+      // Sentry flush failure should not block shutdown; we still log and exit below.
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Fatal: ${msg}`);
     process.exit(1);
   };
   process.on("uncaughtException", fatal);
@@ -76,8 +79,9 @@ async function main(): Promise<void> {
   if (slackApp) {
     try {
       await startSlackApp();
-    } catch (err: any) {
-      logger.error(`Slack app failed to start: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Slack app failed to start: ${msg}`);
     }
   }
 

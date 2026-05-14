@@ -30,9 +30,7 @@ function buildPayload(
     summary: assessment.summary,
     category: assessment.category,
     captured_at: event.timestamp,
-    dashboard_url: base
-      ? `${base.replace(/\/$/, "")}/events/${event.id}`
-      : null,
+    dashboard_url: base ? `${base.replace(/\/$/, "")}/events/${event.id}` : null,
   };
 }
 
@@ -68,11 +66,7 @@ class WebhookHttpError extends Error {
   }
 }
 
-async function postOnce(
-  url: string,
-  body: string,
-  secret: string | undefined,
-): Promise<void> {
+async function postOnce(url: string, body: string, secret: string | undefined): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -129,8 +123,9 @@ export async function notifyWebhook(
     });
     logger.info(`Webhook delivered for ${url.label} (event ${event.id})`);
     return true;
-  } catch (err: any) {
-    logger.error(`Failed to deliver webhook for ${url.label}: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to deliver webhook for ${url.label}: ${msg}`);
     return false;
   }
 }

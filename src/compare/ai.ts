@@ -147,8 +147,8 @@ function getRetryAfterMs(err: unknown): number | null {
   if (e.status !== 429) return null;
   let raw: string | null | undefined;
   const h = e.headers;
-  if (h && typeof (h as any).get === "function") {
-    raw = (h as any).get("retry-after");
+  if (h && typeof (h as { get?: (k: string) => string | null }).get === "function") {
+    raw = (h as { get: (k: string) => string | null }).get("retry-after");
   } else if (h && typeof h === "object") {
     const rec = h as Record<string, string>;
     raw = rec["retry-after"] ?? rec["Retry-After"];
@@ -231,11 +231,7 @@ export async function assessSelectorChange(
   // Cap at 3 selectors with highest text-diff scores
   const ranked = [...pairs].sort((a, b) => b.textDiffScore - a.textDiffScore).slice(0, 3);
 
-  const imageBlocks: Array<{
-    type: "text" | "image";
-    text?: string;
-    source?: { type: "base64"; media_type: "image/png"; data: string };
-  }> = [
+  const imageBlocks: Anthropic.ContentBlockParam[] = [
     {
       type: "text",
       text: `Analyze changes to specific selectors on: ${url}\n\nThe site owner is monitoring specific page sections (not the whole page). Below are reference/current screenshot pairs for each monitored selector, followed by the text diff.\n\nText content diff per selector:\n\`\`\`\n${textDiff || "(no text changes)"}\n\`\`\``,
@@ -260,8 +256,9 @@ export async function assessSelectorChange(
         type: "image",
         source: { type: "base64", media_type: "image/png", data: curB64 },
       });
-    } catch (err: any) {
-      logger.warn(`Skipping selector "${pair.selector}" image pair: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Skipping selector "${pair.selector}" image pair: ${msg}`);
     }
   }
 
@@ -277,7 +274,7 @@ export async function assessSelectorChange(
             model: AI_MODEL,
             max_tokens: 1024,
             system: SYSTEM_PROMPT,
-            messages: [{ role: "user", content: imageBlocks as any }],
+            messages: [{ role: "user", content: imageBlocks }],
           },
           { signal: controller.signal },
         );
@@ -375,9 +372,10 @@ export async function assessChange(
       } catch {
         // Telemetry is best-effort; ignore failures.
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       logger.warn(
-        `AI crop failed for ${url} (bbox=${JSON.stringify(diffBbox)}): ${err?.message ?? err} — falling back to full page`,
+        `AI crop failed for ${url} (bbox=${JSON.stringify(diffBbox)}): ${msg} — falling back to full page`,
       );
       [refBase64, curBase64] = await Promise.all([
         loadAndResizeForAi(referenceScreenshotPath),
@@ -475,8 +473,9 @@ export async function assessChange(
     );
 
     return { ...assessment, usage };
-  } catch (err: any) {
-    logger.error(`Failed to parse AI response for ${url}: ${text}`);
+  } catch (err: unknown) {
+    const parseMsg = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to parse AI response for ${url} (${parseMsg}): ${text}`);
     return {
       significant: true,
       confidence: 0.5,

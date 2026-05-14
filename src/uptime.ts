@@ -20,12 +20,13 @@ export function checkUrlUptime(url: MonitoredUrl): Promise<UptimeResult> {
     let parsed: URL;
     try {
       parsed = new URL(url.url);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       resolve({
         status_code: null,
         response_time_ms: 0,
         ssl_not_after: null,
-        error: `Invalid URL: ${err.message}`,
+        error: `Invalid URL: ${msg}`,
       });
       return;
     }
@@ -89,12 +90,13 @@ export function checkUrlUptime(url: MonitoredUrl): Promise<UptimeResult> {
       });
 
       req.end();
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       finish({
         status_code: null,
         response_time_ms: Date.now() - start,
         ssl_not_after: null,
-        error: err.message,
+        error: msg,
       });
     }
   });
@@ -155,8 +157,9 @@ export async function runAllUptimeChecks(): Promise<void> {
   for (const u of urls) {
     try {
       await runUptimeCheck(u);
-    } catch (err: any) {
-      logger.error(`Uptime check failed for ${u.label}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Uptime check failed for ${u.label}: ${msg}`);
     }
   }
 }

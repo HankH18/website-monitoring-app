@@ -34,8 +34,9 @@ async function postSlack(
       text: `🔴 Uptime failure on *${url.label}* (<${url.url}|link>) — ${detail} for 3 consecutive checks`,
     });
     logger.info(`Uptime Slack alert sent for ${url.label}`);
-  } catch (err: any) {
-    logger.error(`Uptime Slack alert failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Uptime Slack alert failed: ${msg}`);
   }
 }
 
@@ -82,8 +83,9 @@ async function postEmail(
       });
     }
     logger.info(`Uptime email alert sent for ${url.label}`);
-  } catch (err: any) {
-    logger.error(`Uptime email alert failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Uptime email alert failed: ${msg}`);
   }
 }
 
@@ -124,8 +126,9 @@ async function postWebhook(
     } else {
       logger.info(`Uptime webhook delivered for ${url.label}`);
     }
-  } catch (err: any) {
-    logger.error(`Uptime webhook error: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`Uptime webhook error: ${msg}`);
   } finally {
     clearTimeout(timer);
   }

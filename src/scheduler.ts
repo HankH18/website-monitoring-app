@@ -29,8 +29,9 @@ export async function runAllChecks(): Promise<void> {
     const url = urls[i];
     try {
       await checkUrl(url);
-    } catch (err: any) {
-      logger.error(`Check failed for ${url.label} (${url.url}): ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Check failed for ${url.label} (${url.url}): ${msg}`);
     }
 
     // Delay between checks (skip after last URL)
@@ -66,8 +67,9 @@ async function tickRunAllUptime(): Promise<void> {
   _uptimeRunning = true;
   try {
     await runAllUptimeChecks();
-  } catch (err: any) {
-    logger.error(`uptime cycle error: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error(`uptime cycle error: ${msg}`);
   } finally {
     _uptimeRunning = false;
   }
@@ -96,8 +98,9 @@ export async function runBaseline(): Promise<void> {
     try {
       await checkUrl(url, true);
       logger.info(`Baseline captured for ${url.label}`);
-    } catch (err: any) {
-      logger.error(`Baseline failed for ${url.label}: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Baseline failed for ${url.label}: ${msg}`);
     }
 
     if (i < urls.length - 1) {
