@@ -139,6 +139,10 @@ The web dashboard (protected by HTTP basic auth) lets you:
 
 The `./data` directory (DB + captures) is the source of truth. `GET /api/export` streams a tar.gz of it for offsite backup, and `POST /api/cleanup` enforces per-URL retention (configurable via `RETENTION_KEEP_PER_URL`, default 20). For SQLite-consistent online backups, recovery, and CSRF details, see [docs/BACKUP.md](docs/BACKUP.md).
 
+## REST API
+
+A versioned, bearer-authenticated REST API is available at `/api/v1/*` for programmatic use, parallel to the dashboard. Set `API_TOKEN` in `.env` to enable it. See [docs/API.md](docs/API.md) for usage and [docs/openapi.yaml](docs/openapi.yaml) for the schema.
+
 ## Architecture
 
 ```

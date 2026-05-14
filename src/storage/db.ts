@@ -81,6 +81,24 @@ function initSchema(db: Database.Database): void {
   addColumnIfMissing(db, "change_events", "input_tokens", "INTEGER");
   addColumnIfMissing(db, "change_events", "output_tokens", "INTEGER");
   addColumnIfMissing(db, "change_events", "ai_cost_usd", "REAL");
+
+  // Mute windows
+  addColumnIfMissing(db, "monitored_urls", "muted_until", "DATETIME");
+
+  // Uptime layer
+  addColumnIfMissing(db, "monitored_urls", "last_status_check", "DATETIME");
+  addColumnIfMissing(db, "monitored_urls", "last_status_code", "INTEGER");
+  addColumnIfMissing(db, "monitored_urls", "last_response_time_ms", "INTEGER");
+  addColumnIfMissing(db, "monitored_urls", "ssl_not_after", "DATETIME");
+  addColumnIfMissing(
+    db,
+    "monitored_urls",
+    "consecutive_failures",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  db.exec(
+    "UPDATE monitored_urls SET consecutive_failures = 0 WHERE consecutive_failures IS NULL",
+  );
 }
 
 function addColumnIfMissing(
@@ -136,6 +154,65 @@ export function updateUrlStatus(id: number, status: UrlStatus): void {
       "UPDATE monitored_urls SET status = ?, last_checked = datetime('now') WHERE id = ?",
     )
     .run(status, id);
+}
+
+export function muteUrl(id: number, minutes: number): void {
+  getDb()
+    .prepare(
+      `UPDATE monitored_urls SET muted_until = datetime('now', '+' || ? || ' minutes') WHERE id = ?`,
+    )
+    .run(minutes, id);
+}
+
+export function unmuteUrl(id: number): void {
+  getDb()
+    .prepare("UPDATE monitored_urls SET muted_until = NULL WHERE id = ?")
+    .run(id);
+}
+
+export function updateUrlUptime(
+  id: number,
+  statusCode: number | null,
+  responseTimeMs: number,
+  sslNotAfter: Date | null,
+  resetFailures: boolean,
+): number {
+  const db = getDb();
+  if (resetFailures) {
+    db.prepare(
+      `UPDATE monitored_urls
+       SET last_status_check = datetime('now'),
+           last_status_code = ?,
+           last_response_time_ms = ?,
+           ssl_not_after = ?,
+           consecutive_failures = 0
+       WHERE id = ?`,
+    ).run(
+      statusCode,
+      responseTimeMs,
+      sslNotAfter ? sslNotAfter.toISOString() : null,
+      id,
+    );
+    return 0;
+  }
+  db.prepare(
+    `UPDATE monitored_urls
+     SET last_status_check = datetime('now'),
+         last_status_code = ?,
+         last_response_time_ms = ?,
+         ssl_not_after = ?,
+         consecutive_failures = consecutive_failures + 1
+     WHERE id = ?`,
+  ).run(
+    statusCode,
+    responseTimeMs,
+    sslNotAfter ? sslNotAfter.toISOString() : null,
+    id,
+  );
+  const row = db
+    .prepare("SELECT consecutive_failures FROM monitored_urls WHERE id = ?")
+    .get(id) as { consecutive_failures: number } | undefined;
+  return row?.consecutive_failures ?? 0;
 }
 
 export function setUrlReference(urlId: number, captureId: number): void {

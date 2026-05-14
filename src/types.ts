@@ -86,6 +86,12 @@ export interface MonitoredUrl {
   last_change: string | null;
   reference_capture_id: number | null;
   created_at: string;
+  muted_until?: string | null;
+  last_status_check?: string | null;
+  last_status_code?: number | null;
+  last_response_time_ms?: number | null;
+  ssl_not_after?: string | null;
+  consecutive_failures?: number;
 }
 
 export interface Capture {
