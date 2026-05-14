@@ -1,3 +1,12 @@
+import * as Sentry from "@sentry/node";
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    tracesSampleRate: 0,
+    environment: process.env.NODE_ENV || "development",
+  });
+}
+
 import { loadConfig } from "./config";
 import { ensureDataDir } from "./storage/files";
 import { getDb } from "./storage/db";
@@ -8,6 +17,19 @@ import { runBaseline, runAllChecks } from "./scheduler";
 import { startAckChecker } from "./acknowledge";
 import { closeBrowser } from "./capture";
 import { logger } from "./logger";
+
+if (process.env.NODE_ENV === "production" && process.env.SENTRY_DSN) {
+  const fatal = async (err: unknown) => {
+    try {
+      Sentry.captureException(err);
+      await Sentry.flush(2000);
+    } catch {}
+    logger.error(`Fatal: ${(err as any)?.message ?? err}`);
+    process.exit(1);
+  };
+  process.on("uncaughtException", fatal);
+  process.on("unhandledRejection", fatal);
+}
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

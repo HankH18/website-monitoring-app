@@ -61,17 +61,17 @@ The dashboard is at `http://localhost:3000` (default credentials: admin/changeme
 
 ### config.yaml
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `schedule` | `*/15 * * * *` | Cron expression for check frequency |
-| `delay_between_checks_ms` | `3000` | Delay between each URL check (ms) |
-| `thresholds.pixel_diff_percent` | `2.0` | Pixel diff % below which AI is skipped |
-| `thresholds.text_change_lines` | `0` | Text line changes below which AI is skipped |
-| `ack_timeout_minutes` | `60` | Time before an unacknowledged alert gets a reminder |
-| `notifications.slack` | `true` | Enable Slack notifications globally |
-| `notifications.email` | `false` | Enable email notifications globally |
-| `slack.channel` | `#website-monitoring` | Slack channel for alerts |
-| `dashboard.port` | `3000` | Dashboard and API port |
+| Key                             | Default               | Description                                         |
+| ------------------------------- | --------------------- | --------------------------------------------------- |
+| `schedule`                      | `*/15 * * * *`        | Cron expression for check frequency                 |
+| `delay_between_checks_ms`       | `3000`                | Delay between each URL check (ms)                   |
+| `thresholds.pixel_diff_percent` | `2.0`                 | Pixel diff % below which AI is skipped              |
+| `thresholds.text_change_lines`  | `0`                   | Text line changes below which AI is skipped         |
+| `ack_timeout_minutes`           | `60`                  | Time before an unacknowledged alert gets a reminder |
+| `notifications.slack`           | `true`                | Enable Slack notifications globally                 |
+| `notifications.email`           | `false`               | Enable email notifications globally                 |
+| `slack.channel`                 | `#website-monitoring` | Slack channel for alerts                            |
+| `dashboard.port`                | `3000`                | Dashboard and API port                              |
 
 URLs can override notification settings individually:
 
@@ -86,18 +86,18 @@ urls:
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
-| `SLACK_BOT_TOKEN` | For Slack | Slack bot token (xoxb-...) |
-| `SLACK_SIGNING_SECRET` | For Slack | Slack app signing secret |
-| `SLACK_APP_TOKEN` | For Socket Mode | Slack app-level token (xapp-...) |
-| `SMTP_USER` | For SMTP email | SMTP username |
-| `SMTP_PASS` | For SMTP email | SMTP password |
-| `RESEND_API_KEY` | For Resend email | Resend API key |
-| `DASHBOARD_USER` | No | Dashboard username (default: admin) |
-| `DASHBOARD_PASS` | No | Dashboard password (default: changeme) |
-| `DATA_DIR` | No | Data directory (default: ./data) |
+| Variable               | Required         | Description                            |
+| ---------------------- | ---------------- | -------------------------------------- |
+| `ANTHROPIC_API_KEY`    | Yes              | Anthropic API key for Claude           |
+| `SLACK_BOT_TOKEN`      | For Slack        | Slack bot token (xoxb-...)             |
+| `SLACK_SIGNING_SECRET` | For Slack        | Slack app signing secret               |
+| `SLACK_APP_TOKEN`      | For Socket Mode  | Slack app-level token (xapp-...)       |
+| `SMTP_USER`            | For SMTP email   | SMTP username                          |
+| `SMTP_PASS`            | For SMTP email   | SMTP password                          |
+| `RESEND_API_KEY`       | For Resend email | Resend API key                         |
+| `DASHBOARD_USER`       | No               | Dashboard username (default: admin)    |
+| `DASHBOARD_PASS`       | No               | Dashboard password (default: changeme) |
+| `DATA_DIR`             | No               | Data directory (default: ./data)       |
 
 ## Slack App Setup
 
@@ -134,6 +134,10 @@ The web dashboard (protected by HTTP basic auth) lets you:
 - Add/remove URLs from the monitoring list
 - View change history and past alerts
 - Acknowledge changes (updates the reference)
+
+## Backup & export
+
+The `./data` directory (DB + captures) is the source of truth. `GET /api/export` streams a tar.gz of it for offsite backup, and `POST /api/cleanup` enforces per-URL retention (configurable via `RETENTION_KEEP_PER_URL`, default 20). For SQLite-consistent online backups, recovery, and CSRF details, see [docs/BACKUP.md](docs/BACKUP.md).
 
 ## Architecture
 

@@ -5,6 +5,7 @@ import { getAllUrls, upsertUrl } from "./storage/db";
 import { logger } from "./logger";
 
 let _task: cron.ScheduledTask | null = null;
+let _running = false;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +27,9 @@ export async function runAllChecks(): Promise<void> {
     try {
       await checkUrl(url);
     } catch (err: any) {
-      logger.error(`Check failed for ${url.label} (${url.url}): ${err.message}`);
+      logger.error(
+        `Check failed for ${url.label} (${url.url}): ${err.message}`,
+      );
     }
 
     // Delay between checks (skip after last URL)
@@ -36,6 +39,22 @@ export async function runAllChecks(): Promise<void> {
   }
 
   logger.info("Check cycle complete");
+}
+
+async function tickRunAllChecks(): Promise<void> {
+  if (_running) {
+    logger.warn("previous cycle still running; skipping tick");
+    return;
+  }
+  _running = true;
+  const startedAt = Date.now();
+  try {
+    await runAllChecks();
+  } finally {
+    _running = false;
+    const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+    logger.info(`cycle duration: ${seconds}s`);
+  }
 }
 
 export async function runBaseline(): Promise<void> {
@@ -76,7 +95,7 @@ export function startScheduler(): void {
 
   _task = cron.schedule(config.schedule, async () => {
     logger.info("Scheduled check triggered");
-    await runAllChecks();
+    await tickRunAllChecks();
   });
 
   logger.info(`Scheduler started with cron: ${config.schedule}`);
@@ -95,7 +114,7 @@ export function reschedule(newCron: string): void {
 
   _task = cron.schedule(newCron, async () => {
     logger.info("Scheduled check triggered");
-    await runAllChecks();
+    await tickRunAllChecks();
   });
 
   logger.info(`Scheduler rescheduled with cron: ${newCron}`);

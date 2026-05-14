@@ -2,17 +2,67 @@ import { chromium, Browser } from "playwright";
 import fs from "fs";
 import { loadConfig } from "./config";
 import { CaptureResult } from "./types";
-import { ensureCaptureDir, getScreenshotPath, getTextPath } from "./storage/files";
+import {
+  ensureCaptureDir,
+  getScreenshotPath,
+  getTextPath,
+} from "./storage/files";
 import { logger } from "./logger";
+import { withRetry } from "./util/retry";
 
 let _browser: Browser | null = null;
 
 export async function getBrowser(): Promise<Browser> {
   if (_browser && _browser.isConnected()) return _browser;
+  if (_browser) {
+    try {
+      await _browser.close();
+    } catch {}
+    _browser = null;
+  }
   _browser = await chromium.launch({
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
   return _browser;
+}
+
+function isTransientGotoError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { message?: string; name?: string };
+  const msg = (e.message || "").toLowerCase();
+  if (!msg) return false;
+
+  // Permanent: invalid URL / DNS NXDOMAIN
+  if (
+    msg.includes("err_name_not_resolved") ||
+    msg.includes("name_not_resolved") ||
+    msg.includes("invalid url") ||
+    msg.includes("nxdomain")
+  ) {
+    return false;
+  }
+
+  // Permanent: 4xx responses surfaced as error
+  if (/\b4\d{2}\b/.test(msg)) return false;
+
+  // Transient: timeouts, network resets, connection errors, 5xx
+  if (
+    e.name === "TimeoutError" ||
+    msg.includes("timeout") ||
+    msg.includes("err_connection") ||
+    msg.includes("err_network") ||
+    msg.includes("err_internet_disconnected") ||
+    msg.includes("socket hang up") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("net::") ||
+    /\b5\d{2}\b/.test(msg)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export async function closeBrowser(): Promise<void> {
@@ -42,7 +92,28 @@ export async function capturePage(url: string): Promise<CaptureResult> {
   const page = await context.newPage();
 
   try {
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    await withRetry(
+      async () => {
+        const response = await page.goto(url, {
+          waitUntil: "networkidle",
+          timeout: 30000,
+        });
+        if (response && response.status() >= 500) {
+          throw new Error(`HTTP ${response.status()} from ${url}`);
+        }
+      },
+      {
+        attempts: 3,
+        backoffMs: [1000, 3000, 9000],
+        retryable: isTransientGotoError,
+        onRetry: (err, attempt, delayMs) => {
+          const msg = (err as { message?: string })?.message ?? String(err);
+          logger.warn(
+            `Capture transient error for ${url} (attempt ${attempt}): ${msg} — retrying in ${delayMs}ms`,
+          );
+        },
+      },
+    );
     await page.waitForTimeout(config.playwright.wait_after_load_ms);
 
     // Take screenshot
@@ -59,10 +130,12 @@ export async function capturePage(url: string): Promise<CaptureResult> {
           const el = node as HTMLElement;
           const tag = el.tagName.toLowerCase();
 
-          if (["script", "style", "noscript", "svg", "iframe"].includes(tag)) return "";
+          if (["script", "style", "noscript", "svg", "iframe"].includes(tag))
+            return "";
 
           const style = window.getComputedStyle(el);
-          if (style.display === "none" || style.visibility === "hidden") return "";
+          if (style.display === "none" || style.visibility === "hidden")
+            return "";
 
           // Strip Shopify-specific dynamic attributes
           const stripped = el.cloneNode(false) as HTMLElement;
@@ -73,9 +146,26 @@ export async function capturePage(url: string): Promise<CaptureResult> {
 
           // Build structural tag for headings, nav, main, article, etc.
           const structuralTags = [
-            "h1", "h2", "h3", "h4", "h5", "h6",
-            "nav", "main", "header", "footer", "article", "section",
-            "form", "table", "ul", "ol", "li", "a", "img", "button",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "nav",
+            "main",
+            "header",
+            "footer",
+            "article",
+            "section",
+            "form",
+            "table",
+            "ul",
+            "ol",
+            "li",
+            "a",
+            "img",
+            "button",
           ];
 
           let prefix = "";
@@ -92,7 +182,16 @@ export async function capturePage(url: string): Promise<CaptureResult> {
             } else if (tag.match(/^h[1-6]$/)) {
               prefix = `\n${tag.toUpperCase()}: `;
               suffix = "\n";
-            } else if (["nav", "main", "header", "footer", "article", "section"].includes(tag)) {
+            } else if (
+              [
+                "nav",
+                "main",
+                "header",
+                "footer",
+                "article",
+                "section",
+              ].includes(tag)
+            ) {
               prefix = `\n--- ${tag.toUpperCase()} ---\n`;
               suffix = `\n--- /${tag.toUpperCase()} ---\n`;
             }
