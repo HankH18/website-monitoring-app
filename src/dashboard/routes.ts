@@ -24,6 +24,8 @@ import net from "net";
 import cron from "node-cron";
 import cookieParser from "cookie-parser";
 import { doubleCsrf } from "csrf-csrf";
+import { spawn } from "child_process";
+import { cleanupOldCaptures } from "../storage/files";
 
 function isPrivateIp(ip: string): boolean {
   const family = net.isIP(ip);
@@ -291,6 +293,54 @@ export function setupRoutes(app: Application): void {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // API: retention cleanup
+  app.post("/api/cleanup", (req: Request, res: Response) => {
+    try {
+      const result = cleanupOldCaptures();
+      res.json(result);
+    } catch (err: any) {
+      logger.error(`Cleanup failed: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // API: stream tar.gz backup of data directory
+  app.get("/api/export", (req: Request, res: Response) => {
+    const dataDir = getDataDir();
+    const filename = `pageguard-backup-${new Date().toISOString()}.tar.gz`;
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const tar = spawn("tar", ["-czf", "-", "-C", dataDir, "."]);
+    let failed = false;
+
+    tar.stdout.pipe(res);
+
+    tar.stderr.on("data", (chunk) => {
+      logger.warn(`tar stderr: ${chunk.toString().trim()}`);
+    });
+
+    const fail = (msg: string) => {
+      if (failed) return;
+      failed = true;
+      logger.error(`Export failed: ${msg}`);
+      if (!res.headersSent) {
+        res.status(500).json({ error: msg });
+      } else {
+        res.end();
+      }
+    };
+
+    tar.on("error", (err) => fail(err.message));
+    tar.on("close", (code) => {
+      if (code !== 0) fail(`tar exited with code ${code}`);
+    });
+
+    req.on("close", () => {
+      if (!tar.killed) tar.kill();
+    });
   });
 
   // Serve screenshot images with correct path resolution

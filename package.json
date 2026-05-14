@@ -8,10 +8,13 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "baseline": "tsx src/index.ts --baseline",
-    "check": "tsx src/index.ts --check"
+    "check": "tsx src/index.ts --check",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@sentry/node": "^10.53.1",
     "@slack/bolt": "^4.1.0",
     "@slack/web-api": "^7.8.0",
     "better-sqlite3": "^11.7.0",
@@ -42,6 +45,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.17",
     "@types/pngjs": "^6.0.5",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.6"
   }
 }

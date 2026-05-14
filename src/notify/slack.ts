@@ -12,6 +12,50 @@ import {
   getCaptureById,
 } from "../storage/db";
 import { logger } from "../logger";
+import { withRetry } from "../util/retry";
+
+function isTransientSlackError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as {
+    code?: string;
+    status?: number;
+    statusCode?: number;
+    message?: string;
+  };
+  const status = e.status ?? e.statusCode;
+  if (typeof status === "number") {
+    if (status >= 500) return true;
+    if (status >= 400) return false;
+  }
+  // Slack SDK network errors
+  if (e.code === "slack_webapi_request_error") return true;
+  const msg = (e.message || "").toLowerCase();
+  if (
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("network") ||
+    msg.includes("fetch failed") ||
+    msg.includes("timeout")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+async function slackCall<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  return withRetry(fn, {
+    attempts: 3,
+    backoffMs: [1000, 3000, 9000],
+    retryable: isTransientSlackError,
+    onRetry: (err, attempt, delayMs) => {
+      const msg = (err as { message?: string })?.message ?? String(err);
+      logger.warn(
+        `Slack ${label} transient error (attempt ${attempt}): ${msg} — retrying in ${delayMs}ms`,
+      );
+    },
+  });
+}
 
 let _app: App | null = null;
 let _webClient: WebClient | null = null;
@@ -26,7 +70,9 @@ export function initSlackApp(expressApp?: any): App | null {
   const appToken = process.env.SLACK_APP_TOKEN;
 
   if (!token || !signingSecret) {
-    logger.warn("Slack credentials not configured — Slack notifications disabled");
+    logger.warn(
+      "Slack credentials not configured — Slack notifications disabled",
+    );
     return null;
   }
 
@@ -35,9 +81,7 @@ export function initSlackApp(expressApp?: any): App | null {
   _app = new App({
     token,
     signingSecret,
-    ...(appToken
-      ? { socketMode: true, appToken }
-      : {}),
+    ...(appToken ? { socketMode: true, appToken } : {}),
     logLevel: LogLevel.WARN,
   });
 
@@ -126,7 +170,7 @@ export async function sendSlackAlert(
   url: MonitoredUrl,
   assessment: AiAssessment,
   currentScreenshotPath: string,
-  referenceScreenshotPath: string
+  referenceScreenshotPath: string,
 ): Promise<{ ts: string; channel: string } | null> {
   if (!_webClient) {
     logger.warn("Slack not initialized — skipping notification");
@@ -147,95 +191,103 @@ export async function sendSlackAlert(
   const emoji = categoryEmoji[assessment.category] || "⚪";
   const detailsList = assessment.details.map((d) => `• ${d}`).join("\n");
 
+  const webClient = _webClient;
+
   try {
     // Upload before/after screenshots
-    const refUpload = await _webClient.files.uploadV2({
-      channel_id: channel,
-      file: fs.readFileSync(referenceScreenshotPath),
-      filename: `reference-${url.url_hash}.png`,
-      title: `Reference: ${url.label}`,
-    });
+    const refUpload = await slackCall("files.uploadV2 (reference)", () =>
+      webClient.files.uploadV2({
+        channel_id: channel,
+        file: fs.readFileSync(referenceScreenshotPath),
+        filename: `reference-${url.url_hash}.png`,
+        title: `Reference: ${url.label}`,
+      }),
+    );
 
-    const curUpload = await _webClient.files.uploadV2({
-      channel_id: channel,
-      file: fs.readFileSync(currentScreenshotPath),
-      filename: `current-${url.url_hash}.png`,
-      title: `Current: ${url.label}`,
-    });
+    const curUpload = await slackCall("files.uploadV2 (current)", () =>
+      webClient.files.uploadV2({
+        channel_id: channel,
+        file: fs.readFileSync(currentScreenshotPath),
+        filename: `current-${url.url_hash}.png`,
+        title: `Current: ${url.label}`,
+      }),
+    );
 
     // Send alert message
-    const result = await _webClient.chat.postMessage({
-      channel,
-      text: `${emoji} Change detected on ${url.label}: ${assessment.summary}`,
-      blocks: [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: `${emoji} Change Detected: ${url.label}`,
+    const result = await slackCall("chat.postMessage (alert)", () =>
+      webClient.chat.postMessage({
+        channel,
+        text: `${emoji} Change detected on ${url.label}: ${assessment.summary}`,
+        blocks: [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: `${emoji} Change Detected: ${url.label}`,
+            },
           },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `*URL:*\n<${url.url}|${url.url}>`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Category:*\n${assessment.category.replace("_", " ")}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Confidence:*\n${(assessment.confidence * 100).toFixed(0)}%`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Pixel Diff:*\n${event.pixel_diff_percent.toFixed(1)}%`,
-            },
-          ],
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*Summary:* ${assessment.summary}`,
-          },
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*Details:*\n${detailsList}`,
-          },
-        },
-        {
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: {
-                type: "plain_text",
-                text: "✅ Mark as Intentional",
+          {
+            type: "section",
+            fields: [
+              {
+                type: "mrkdwn",
+                text: `*URL:*\n<${url.url}|${url.url}>`,
               },
-              action_id: "mark_intentional",
-              value: JSON.stringify({ event_id: event.id }),
-              style: "primary",
-            },
-          ],
-        },
-        {
-          type: "context",
-          elements: [
-            {
+              {
+                type: "mrkdwn",
+                text: `*Category:*\n${assessment.category.replace("_", " ")}`,
+              },
+              {
+                type: "mrkdwn",
+                text: `*Confidence:*\n${(assessment.confidence * 100).toFixed(0)}%`,
+              },
+              {
+                type: "mrkdwn",
+                text: `*Pixel Diff:*\n${event.pixel_diff_percent.toFixed(1)}%`,
+              },
+            ],
+          },
+          {
+            type: "section",
+            text: {
               type: "mrkdwn",
-              text: 'Reply "approved" in this thread to acknowledge, or click the button above.',
+              text: `*Summary:* ${assessment.summary}`,
             },
-          ],
-        },
-      ],
-    });
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Details:*\n${detailsList}`,
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: {
+                  type: "plain_text",
+                  text: "✅ Mark as Intentional",
+                },
+                action_id: "mark_intentional",
+                value: JSON.stringify({ event_id: event.id }),
+                style: "primary",
+              },
+            ],
+          },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: 'Reply "approved" in this thread to acknowledge, or click the button above.',
+              },
+            ],
+          },
+        ],
+      }),
+    );
 
     const ts = result.ts!;
 
@@ -249,16 +301,19 @@ export async function sendSlackAlert(
 
 export async function sendSlackReminder(
   event: ChangeEvent,
-  url: MonitoredUrl
+  url: MonitoredUrl,
 ): Promise<void> {
   if (!_webClient || !event.slack_ts || !event.slack_channel) return;
+  const webClient = _webClient;
 
   try {
-    await _webClient.chat.postMessage({
-      channel: event.slack_channel,
-      thread_ts: event.slack_ts,
-      text: `⏰ Reminder: Change on *${url.label}* (<${url.url}|link>) has not been acknowledged. Please review and click "Mark as Intentional" or reply "approved" if this change is expected.`,
-    });
+    await slackCall("chat.postMessage (reminder)", () =>
+      webClient.chat.postMessage({
+        channel: event.slack_channel!,
+        thread_ts: event.slack_ts!,
+        text: `⏰ Reminder: Change on *${url.label}* (<${url.url}|link>) has not been acknowledged. Please review and click "Mark as Intentional" or reply "approved" if this change is expected.`,
+      }),
+    );
     logger.info(`Reminder sent for event ${event.id}`);
   } catch (err: any) {
     logger.error(`Failed to send Slack reminder: ${err.message}`);
