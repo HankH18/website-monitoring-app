@@ -52,6 +52,7 @@ export interface CaptureResult {
   timestamp: string;
   url: string;
   error?: string;
+  selectors?: SelectorCapture[];
 }
 
 export interface ComparisonResult {
@@ -66,12 +67,7 @@ export interface AiAssessment {
   confidence: number;
   summary: string;
   details: string[];
-  category:
-    | "layout_break"
-    | "content_change"
-    | "error_state"
-    | "missing_element"
-    | "other";
+  category: "layout_break" | "content_change" | "error_state" | "missing_element" | "other";
 }
 
 export type UrlStatus = "ok" | "change_detected" | "error" | "pending";
@@ -92,6 +88,16 @@ export interface MonitoredUrl {
   last_response_time_ms?: number | null;
   ssl_not_after?: string | null;
   consecutive_failures?: number;
+  selectors_json?: string | null;
+  selectors?: string[];
+}
+
+export interface SelectorCapture {
+  selector: string;
+  text: string;
+  textPath: string;
+  screenshotPath: string;
+  matched: boolean;
 }
 
 export interface Capture {

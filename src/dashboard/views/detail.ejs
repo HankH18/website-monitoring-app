@@ -130,6 +130,64 @@
   </div>
 </div>
 
+<div class="card">
+  <div class="card-header">
+    <h2>Monitored Selectors</h2>
+    <span class="text-sm text-dim">
+      <%= (url.selectors && url.selectors.length > 0) ? url.selectors.length + ' selector(s)' : 'Whole page (no selectors)' %>
+    </span>
+  </div>
+  <form method="POST" action="/url/<%= url.id %>/selectors">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label class="text-sm text-muted" style="display:block; margin-bottom:4px;">CSS selectors, one per line (empty = monitor the whole page)</label>
+    <textarea name="selectors" rows="4" placeholder="#main-content&#10;.product-price" style="width:100%; font-family:monospace; font-size:12px;"><%= (url.selectors || []).join('\n') %></textarea>
+    <div style="margin-top:8px;">
+      <button type="submit" class="btn btn-outline btn-sm">Save Selectors</button>
+    </div>
+  </form>
+</div>
+
+<% if (typeof selectorViews !== 'undefined' && selectorViews && selectorViews.length > 0) { %>
+<div class="card">
+  <div class="card-header">
+    <h2>Selector Snapshots</h2>
+    <span class="text-sm text-dim">Reference vs. latest per selector</span>
+  </div>
+  <% for (const sv of selectorViews) { %>
+    <div style="border:1px solid var(--surface2); border-radius:6px; padding:12px; margin-bottom:12px;">
+      <div style="font-family:monospace; font-weight:500; margin-bottom:8px;">
+        [<%= sv.index %>] <%= sv.selector %>
+        <% if (sv.refText !== sv.curText) { %>
+          <span class="badge badge-change" style="margin-left:8px;">Changed</span>
+        <% } else { %>
+          <span class="badge badge-ok" style="margin-left:8px;">Unchanged</span>
+        <% } %>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div>
+          <div class="text-sm text-dim" style="margin-bottom:4px;">Reference</div>
+          <% if (sv.refImage) { %>
+            <img src="/screenshot/<%= sv.refImage %>" alt="Reference selector" style="max-width:100%; border:1px solid var(--surface2); border-radius:4px;">
+          <% } else { %>
+            <div class="empty" style="padding:14px; font-size:12px;">No reference image</div>
+          <% } %>
+          <pre style="margin-top:6px; font-size:11px; max-height:140px; overflow:auto; background:var(--surface2); padding:8px; border-radius:4px; white-space:pre-wrap;"><%= sv.refText || '(empty)' %></pre>
+        </div>
+        <div>
+          <div class="text-sm text-dim" style="margin-bottom:4px;">Latest</div>
+          <% if (sv.curImage) { %>
+            <img src="/screenshot/<%= sv.curImage %>" alt="Current selector" style="max-width:100%; border:1px solid var(--surface2); border-radius:4px;">
+          <% } else { %>
+            <div class="empty" style="padding:14px; font-size:12px;">No current image (selector may not match)</div>
+          <% } %>
+          <pre style="margin-top:6px; font-size:11px; max-height:140px; overflow:auto; background:var(--surface2); padding:8px; border-radius:4px; white-space:pre-wrap;"><%= sv.curText || '(empty)' %></pre>
+        </div>
+      </div>
+    </div>
+  <% } %>
+</div>
+<% } %>
+
 <% if (reference && latest) { %>
 <div class="card">
   <div class="card-header">
