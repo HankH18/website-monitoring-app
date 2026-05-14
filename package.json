@@ -27,7 +27,7 @@
     "js-yaml": "^4.1.0",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.0",
-    "pixelmatch": "^6.0.0",
+    "pixelmatch": "^7.2.0",
     "playwright": "^1.49.0",
     "pngjs": "^7.0.0",
     "resend": "^4.0.0",
